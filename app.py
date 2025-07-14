@@ -4,7 +4,14 @@ import yfinance as yf
 from io import StringIO
 import time
 import datetime
-from grok import Grok
+import requests
+
+# Try to import the Grok SDK
+try:
+    from grok import Grok
+    GROK_SDK_AVAILABLE = True
+except ImportError:
+    GROK_SDK_AVAILABLE = False
 
 # Hardcoded full prompt with enhancements for real-time tool usage, dynamic date, and comprehensive analysis
 # Escaped {asset} to {{asset}} to prevent KeyError during string formatting
@@ -40,6 +47,9 @@ Additional Guidelines
 [Keep similar, but add: "Include timing projections based on catalysts/technicals (e.g., 'Enter post-Fed announcement'). Backtest all projections for accuracy."]
 """
 
+# API endpoint from xAI docs
+XAI_API_URL = "https://api.x.ai/v1/chat/completions"
+
 st.title("Trade Opportunity Executor (Paper Trading)")
 
 api_key = st.text_input("Enter xAI Grok API Key", type="password")
@@ -52,7 +62,6 @@ if 'portfolio' not in st.session_state:
 
 if st.button("Generate Recommendations"):
     if api_key:
-        client = Grok(api_key=api_key)
         # Dynamic current date
         current_date = datetime.date.today().strftime("%B %d, %Y")
         formatted_prompt = PROMPT.format(current_date=current_date)
@@ -80,16 +89,31 @@ if st.button("Generate Recommendations"):
         prompt_with_data = formatted_prompt + f"\n\nPre-Fetched Real-Time Data (use and validate against this): {current_data}. Integrate this with tool calls for full analysis."
 
         try:
-            chat_completion = client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt_with_data,
-                    }
-                ],
-                model="grok-1", # Corrected model name
-            )
-            content = chat_completion.choices[0].message.content
+            if GROK_SDK_AVAILABLE:
+                client = Grok(api_key=api_key)
+                chat_completion = client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt_with_data,
+                        }
+                    ],
+                    model="grok-1", # Corrected model name
+                )
+                content = chat_completion.choices[0].message.content
+            else:
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "model": "grok-1",  # Corrected model name
+                    "messages": [{"role": "user", "content": prompt_with_data}]
+                }
+                response = requests.post(XAI_API_URL, headers=headers, json=payload)
+                response.raise_for_status()
+                content = response.json()["choices"][0]["message"]["content"]
+
             st.markdown("### Generated Recommendations")
             st.markdown(content)
 
