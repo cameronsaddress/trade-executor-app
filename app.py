@@ -10,13 +10,13 @@ import warnings
 # Suppress FutureWarnings from yfinance
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Improved prompt: Added requirement to analyze 5 top sites for real-time data, ensured dynamic date
+# Improved prompt: Emphasize fetching from 5 top sites with today's data only, cross-verification, and comprehensive report
 PROMPT = """
 System Instructions
-You are Grok4_Heavy, Head of Trade Opportunity Research at an elite quant fund specializing in high-profit trades. Your task is to research and identify 3-7 current top trade opportunities (aiming to maximize profit potential) by analyzing live market data from the top 5 highest-ranked sites for real-time financial data (e.g., investing.com, finance.yahoo.com, google.com/finance, bloomberg.com/markets, cnbc.com/quotes). Use browse_page on each site's relevant URL (e.g., for AAPL: https://www.investing.com/equities/apple-computer-inc, https://finance.yahoo.com/quote/AAPL, https://www.google.com/finance/quote/AAPL:NASDAQ, etc.) to fetch and cross-verify real-time quotes, charts, news, technicals, and economics, ensuring all data is timestamped within the last 5 minutes as of the current date: {current_date}. Supplement with tool calls (e.g., web_search for cross-verification like on-chain data or broader sentiment) if needed. Focus on opportunities with highest expected ROI, considering volatility, momentum, risk-reward, and backtested performance. Prioritize trades yielding at least 15% profit within 1-7 days, based on historical patterns, current signals, and predictive models.
+You are Grok4_Heavy, Head of Trade Opportunity Research at an elite quant fund specializing in high-profit trades. Your task is to research and identify 3-7 current top trade opportunities (aiming to maximize profit potential) by analyzing live market data from the top 5 highest-ranked sites for real-time financial data: https://www.investing.com/, https://finance.yahoo.com/, https://www.google.com/finance/, https://www.bloomberg.com/markets, https://www.cnbc.com/quotes. For each asset, explicitly browse_page on relevant URLs from ALL 5 sites (e.g., for BTC/USD: https://www.investing.com/crypto/bitcoin, https://finance.yahoo.com/quote/BTC-USD, https://www.google.com/finance/quote/BTC-USD, https://www.bloomberg.com/quote/BTCUSD:CUR, https://www.cnbc.com/quotes/BTC.CB=) to fetch and cross-verify real-time quotes, charts, news, technicals, and economics. Ensure ALL data is strictly from today ({current_date}) and timestamped within the last 5 minutes—discard any older data. Cross-verify consistency across sites (e.g., if prices differ, use the median and note discrepancies). Supplement with tool calls (e.g., web_search for on-chain/cross-verification like 'bitcoin on-chain data {current_date}') if needed. Focus on opportunities with highest expected ROI, considering volatility, momentum, risk-reward, and backtested performance. Prioritize trades yielding at least 15% profit within 1-7 days, based on historical patterns, current signals, and predictive models.
 [Data Categories remain the same, but add: "Use code_execution for backtesting or simple ML predictions (e.g., trend forecasting via numpy/torch)."]
 
-**IMPORTANT: ALL data MUST be REAL-TIME as of {current_date} and fetched via tools from the 5 sites listed. Do NOT use internal knowledge for prices, news, or metrics—explicitly call browse_page on each of the 5 sites for every asset analyzed (ensure timestamp ≤5 minutes), web_search for on-chain/cross-verification, and code_execution for backtesting. If tools return data conflicting with your knowledge (e.g., BTC >100k), use the tool data ONLY. Responses without tool citations and fresh timestamps will be invalid. To make analysis as smart as the smartest investing team, BEFORE any recommendation, use tools to read up-to-date documentation, reports, etc.: e.g., browse_page on sec.gov for latest filings, investing.com/news for catalysts, web_search for 'latest {{asset}} analyst reports 2025', and integrate insights from hedge fund strategies like those from Renaissance Technologies or Citadel (via web_search for public summaries). Ensure all numeric fields (prices, ROI, etc.) are provided as pure numbers without symbols.**
+**IMPORTANT: The current date is {current_date}. ALL data MUST be fetched via tools in real-time FROM TODAY ONLY. Do NOT use internal knowledge or any data not explicitly fetched and timestamped today—explicitly call browse_page on each of the 5 sites for every asset analyzed (ensure timestamp ≤5 minutes from {current_date}), web_search for on-chain/cross-verification with date filter 'site:glassnode.com bitcoin metrics {current_date}', and code_execution for backtesting using only historical data up to yesterday but projections based on today's fetches. If tools return data conflicting with your knowledge (e.g., BTC >100k), use the tool data ONLY. Responses without tool citations, fresh timestamps from today, and cross-verification from all 5 sites will be invalid. BEFORE any recommendation, compile a comprehensive report: Gather data from the 5 sites, combine into an extremely advanced analysis (e.g., compare RSI/MACD across sources, sentiment from news, on-chain metrics), and provide an expert synthesis that analyzes discrepancies, trends, and implications like a top-tier hedge fund team.**
 
 Trade Opportunity Selection Criteria
 Number of Opportunities: 3-7 top trades (if fewer qualify, indicate why and suggest alternatives; do not force).
@@ -36,7 +36,8 @@ Net Impact: Total risk ≤4% of $100,000 NAV.
 In ties, prioritize liquidity, lower beta, and positive catalysts. For crypto, require on-chain spikes via tools.
 Use tools step-by-step for analysis (e.g., backtest via code_execution).
 Output Format
-Output strictly as a Markdown table with these columns:
+First, a Comprehensive Report section (≤500 words) synthesizing data from the 5 sites and tools into an advanced expert analysis, combining all sources, analyzing trends/discrepancies, and providing insights.
+Then, strictly as a Markdown table with these columns:
 | Symbol/Pair | Action (Buy/Sell) | Entry Price | Target Price | Stop Loss | Expected Entry Condition/Timing | Expected Exit Condition/Timing | Thesis (≤50 words) | Projected ROI (%) | Likelihood of Profit (%) | Recommended Allocation (% of portfolio) | Plain English Summary (1 sentence) | Data Sources |
 Where 'Plain English Summary' is a simple 1-sentence explanation for non-traders summarizing what the analysis means (e.g., 'This suggests the stock price will rise due to strong company news, making it a good time to buy.').
 Followed immediately by a paragraph summary (≤100 words) of the overall market outlook, key opportunities, and risks. If fewer than 3 qualify: "Fewer than 3 opportunities meet criteria; explore alternatives: [list 1-2 backups]." Base everything on verified data/tools. Use factual language; include brief tool citations in thesis if key.
@@ -129,6 +130,8 @@ if 'recommendations' not in st.session_state:
     st.session_state.recommendations = None
 if 'summary' not in st.session_state:
     st.session_state.summary = ""
+if 'report' not in st.session_state:
+    st.session_state.report = ""
 
 if st.button("AI Predictions"):
     if api_key:
@@ -162,13 +165,21 @@ if st.button("AI Predictions"):
                 response.raise_for_status()
                 content = response.json()["choices"][0]["message"]["content"]
 
-                # Parse content: table + summary
-                if '|' in content:
+                # Parse content: report + table + summary
+                # Assume report ends with a marker, e.g., '--- End of Report ---', but since not, use heuristics: find start of table
+                table_start = content.find('|')
+                if table_start != -1:
+                    report_content = content[:table_start].strip() if table_start > 0 else ''
                     table_end = content.rfind('|') + 1
-                    table_content = content[:table_end].strip()
+                    table_content = content[table_start:table_end].strip()
                     summary_content = content[table_end:].strip()
+                else:
+                    report_content = ''
+                    table_content = ''
+                    summary_content = content.strip()
 
-                    # Parse table
+                # Parse table if present
+                if table_content:
                     lines = table_content.split('\n')
                     if len(lines) > 2:
                         data_lines = [line for line in lines[2:] if line.strip()]  # Filter empty lines
@@ -201,16 +212,24 @@ if st.button("AI Predictions"):
                         df = df.dropna(thresh=len(df.columns) * 0.5)
 
                         st.session_state.recommendations = df
-                        st.session_state.summary = summary_content
                     else:
                         st.error("No valid table found in response.")
                 else:
-                    st.error("Invalid response format.")
+                    st.error("No table found in response.")
+
+                st.session_state.report = report_content
+                st.session_state.summary = summary_content
+
             except Exception as e:
                 st.error(f"Error generating predictions: {e}")
                 st.info("If you see a 404 error, double-check your API key and ensure you have access to the Grok API. The endpoint is correct per official docs.")
     else:
         st.error("Please enter your xAI API key in the sidebar.")
+
+# Display report if available
+if 'report' in st.session_state and st.session_state.report:
+    st.markdown("### Comprehensive Market Report")
+    st.markdown(f'<p style="color: #FAFAFA;">{st.session_state.report}</p>', unsafe_allow_html=True)
 
 # Display recommendations if available
 if st.session_state.recommendations is not None:
