@@ -10,13 +10,13 @@ import warnings
 # Suppress FutureWarnings from yfinance
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Improved prompt: Emphasize fetching from 5 top sites with today's data only, cross-verification, and comprehensive report
+# Improved prompt: Enforce fetching ONLY today's real-time data from 5 top sites, cross-verification, and comprehensive report before recommendations
 PROMPT = """
 System Instructions
-You are Grok4_Heavy, Head of Trade Opportunity Research at an elite quant fund specializing in high-profit trades. Your task is to research and identify 3-7 current top trade opportunities (aiming to maximize profit potential) by analyzing live market data from the top 5 highest-ranked sites for real-time financial data: https://www.investing.com/, https://finance.yahoo.com/, https://www.google.com/finance/, https://www.bloomberg.com/markets, https://www.cnbc.com/quotes. For each asset, explicitly browse_page on relevant URLs from ALL 5 sites (e.g., for BTC/USD: https://www.investing.com/crypto/bitcoin, https://finance.yahoo.com/quote/BTC-USD, https://www.google.com/finance/quote/BTC-USD, https://www.bloomberg.com/quote/BTCUSD:CUR, https://www.cnbc.com/quotes/BTC.CB=) to fetch and cross-verify real-time quotes, charts, news, technicals, and economics. Ensure ALL data is strictly from today ({current_date}) and timestamped within the last 5 minutes—discard any older data. Cross-verify consistency across sites (e.g., if prices differ, use the median and note discrepancies). Supplement with tool calls (e.g., web_search for on-chain/cross-verification like 'bitcoin on-chain data {current_date}') if needed. Focus on opportunities with highest expected ROI, considering volatility, momentum, risk-reward, and backtested performance. Prioritize trades yielding at least 15% profit within 1-7 days, based on historical patterns, current signals, and predictive models.
+You are Grok4_Heavy, Head of Trade Opportunity Research at an elite quant fund specializing in high-profit trades. Your task is to research and identify 3-7 current top trade opportunities (aiming to maximize profit potential) by analyzing live market data STRICTLY from today ({current_date}) from the top 5 highest-ranked sites for real-time financial data: https://www.investing.com/, https://finance.yahoo.com/, https://www.google.com/finance/, https://www.bloomberg.com/markets, https://www.cnbc.com/quotes. For each asset, explicitly browse_page on relevant URLs from ALL 5 sites (e.g., for BTC/USD: https://www.investing.com/crypto/bitcoin, https://finance.yahoo.com/quote/BTC-USD, https://www.google.com/finance/quote/BTC-USD, https://www.bloomberg.com/quote/BTCUSD:CUR, https://www.cnbc.com/quotes/BTC.CB=) to fetch and cross-verify real-time quotes, charts, news, technicals, and economics. Ensure ALL data is strictly from today ({current_date}) and timestamped within the last 5 minutes—discard ANY data not explicitly from today. Cross-verify consistency across sites (e.g., if prices differ by >1%, flag and use the average from sites with today's timestamps; reject if inconsistency can't be resolved with today's data). Supplement with tool calls (e.g., web_search restricted to 'after:{current_date} before:{next_day}' for on-chain/cross-verification like 'bitcoin on-chain data {current_date} site:glassnode.com'). Focus on opportunities with highest expected ROI, considering volatility, momentum, risk-reward, and backtested performance. Prioritize trades yielding at least 15% profit within 1-7 days, based on historical patterns, current signals, and predictive models.
 [Data Categories remain the same, but add: "Use code_execution for backtesting or simple ML predictions (e.g., trend forecasting via numpy/torch)."]
 
-**IMPORTANT: The current date is {current_date}. ALL data MUST be fetched via tools in real-time FROM TODAY ONLY. Do NOT use internal knowledge or any data not explicitly fetched and timestamped today—explicitly call browse_page on each of the 5 sites for every asset analyzed (ensure timestamp ≤5 minutes from {current_date}), web_search for on-chain/cross-verification with date filter 'site:glassnode.com bitcoin metrics {current_date}', and code_execution for backtesting using only historical data up to yesterday but projections based on today's fetches. If tools return data conflicting with your knowledge (e.g., BTC >100k), use the tool data ONLY. Responses without tool citations, fresh timestamps from today, and cross-verification from all 5 sites will be invalid. BEFORE any recommendation, compile a comprehensive report: Gather data from the 5 sites, combine into an extremely advanced analysis (e.g., compare RSI/MACD across sources, sentiment from news, on-chain metrics), and provide an expert synthesis that analyzes discrepancies, trends, and implications like a top-tier hedge fund team.**
+**IMPORTANT: The current date is {current_date} (next day is {next_day}). ALL data MUST be fetched via tools in real-time STRICTLY FROM TODAY ONLY. Do NOT use internal knowledge or any data not explicitly fetched and timestamped from {current_date}—explicitly call browse_page on each of the 5 sites for every asset analyzed (ensure timestamp ≤5 minutes from {current_date}), web_search with date filters for on-chain/cross-verification, and code_execution for backtesting using only historical data up to yesterday but projections based on today's fetches. If tools return data conflicting with your knowledge (e.g., BTC >100k), use the tool data ONLY. Responses without tool citations, fresh timestamps from today, and cross-verification from all 5 sites will be invalid. BEFORE any recommendation, compile a comprehensive report: Gather data from the 5 sites (quotes, news, technicals from {current_date} only), combine into an extremely advanced analysis (e.g., compare RSI/MACD/volumes across sources, sentiment from today's news, on-chain metrics from today), analyze discrepancies/trends/implications like a top-tier hedge fund team, and provide an expert synthesis (≤500 words) that integrates all sources for holistic insights.**
 
 Trade Opportunity Selection Criteria
 Number of Opportunities: 3-7 top trades (if fewer qualify, indicate why and suggest alternatives; do not force).
@@ -137,26 +137,32 @@ if st.button("AI Predictions"):
     if api_key:
         with st.spinner("Generating AI Predictions..."):
             try:
-                # Dynamic current date
-                current_date = datetime.date.today().strftime("%B %d, %Y")
-                formatted_prompt = PROMPT.format(current_date=current_date)
+                # Dynamic current date and next day for date filtering
+                current_date_obj = datetime.date.today()
+                current_date = current_date_obj.strftime("%B %d, %Y")
+                next_day_obj = current_date_obj + datetime.timedelta(days=1)
+                next_day = next_day_obj.strftime("%B %d, %Y")
+                formatted_prompt = PROMPT.format(current_date=current_date, next_day=next_day)
 
-                # Pre-fetch real-time data for key assets (updated tickers)
+                # Pre-fetch real-time data for key assets (updated tickers) from yfinance as initial validation (today's data only)
                 key_assets = ['BTC-USD', 'ETH-USD', 'NVDA', 'TSLA', 'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AAPL', 'MSFT', 'GC=F']  # Changed 'GOLD' to 'GC=F'
                 current_data = {}
                 for asset in key_assets:
                     try:
-                        data = yf.download(asset, period='1d', interval='1m', progress=False, auto_adjust=True)  # Explicit auto_adjust=True to avoid warning
-                        current_price = data['Close'][-1]
-                        current_data[asset] = {
-                            'price': float(current_price),
-                            'timestamp': data.index[-1].strftime("%Y-%m-%d %H:%M:%S")
-                        }
+                        data = yf.download(asset, period='1d', interval='1m', progress=False, auto_adjust=True)  # Fetches today's data only
+                        if not data.empty and data.index[-1].date() == current_date_obj:
+                            current_price = data['Close'][-1]
+                            current_data[asset] = {
+                                'price': float(current_price),
+                                'timestamp': data.index[-1].strftime("%Y-%m-%d %H:%M:%S")
+                            }
+                        else:
+                            current_data[asset] = {'error': 'No data from today'}
                     except:
-                        pass  # Skip if fetch fails
+                        current_data[asset] = {'error': 'Fetch failed'}
 
-                # Append pre-fetched data to prompt
-                prompt_with_data = formatted_prompt + f"\n\nPre-Fetched Real-Time Data (use and validate against this): {current_data}. Integrate this with tool calls for full analysis."
+                # Append pre-fetched data to prompt (enforce use of this for validation)
+                prompt_with_data = formatted_prompt + f"\n\nPre-Fetched Real-Time Data from Today Only (use and validate against this; reject if conflicts with tool fetches): {current_data}. Integrate this with tool calls for full analysis, ensuring all final prices match today's fetches."
 
                 headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
                 payload = {"model": "grok-4",  # Changed to 'grok-4' based on docs (assuming Heavy is a variant; adjust if needed)
@@ -197,16 +203,19 @@ if st.button("AI Predictions"):
                         for col in numeric_cols:
                             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-                        # Validate and fill NaN prices with live data where possible
+                        # Strict validation: Override or reject if entry_price doesn't match today's live fetch (e.g., for BTC ensure ~120k)
                         for index, row in df.iterrows():
-                            if pd.isna(row['Entry Price']):
-                                symbol = row['Symbol/Pair'].replace('/', '-')
-                                try:
-                                    data = yf.download(symbol, period='1d', interval='1m', progress=False, auto_adjust=True)
+                            symbol = row['Symbol/Pair'].replace('/', '-')
+                            try:
+                                data = yf.download(symbol, period='1d', interval='1m', progress=False, auto_adjust=True)
+                                if not data.empty and data.index[-1].date() == current_date_obj:
                                     current_price = data['Close'][-1]
-                                    df.at[index, 'Entry Price'] = current_price
-                                except:
-                                    df.at[index, 'Entry Price'] = float('nan')  # Keep as NaN if fetch fails
+                                    if pd.isna(row['Entry Price']) or abs(current_price - row['Entry Price']) > 0.01 * current_price:  # 1% tolerance for volatility
+                                        df.at[index, 'Entry Price'] = current_price  # Override with live today's price
+                                else:
+                                    df.drop(index, inplace=True)  # Drop if no today's data
+                            except:
+                                df.drop(index, inplace=True)  # Drop if fetch fails
 
                         # Drop rows with too many NaNs (e.g., if >50% NaN)
                         df = df.dropna(thresh=len(df.columns) * 0.5)
