@@ -47,11 +47,11 @@ Additional Guidelines
 # API endpoint (confirmed from official docs)
 XAI_API_URL = "https://api.x.ai/v1/chat/completions"
 
-st.title("Professional Trade Opportunity Predictor")
+st.title("Trade Opportunity Analysis: Grok 4 Heavy")
 
 with st.sidebar:
-    api_key = st.text_input("Enter xAI Grok API Key", type="password")
-    st.info("Enter your API key to generate predictions. This app simulates paper trading. If 404 error persists, verify your API key and model access in xAI console.")
+    api_key = st.text_input("xAI API Key", type="password")
+    st.info("Enter your API key.")
 
 # Initialize session state
 if 'portfolio' not in st.session_state:
@@ -147,7 +147,7 @@ if st.button("AI Predictions"):
 
 # Display recommendations if available
 if st.session_state.recommendations is not None:
-    st.markdown("### AI-Generated Trade Predictions")
+    st.markdown("### AI-Generated Trade Analysis")
 
     df = st.session_state.recommendations
 
@@ -254,4 +254,4 @@ with st.expander("View Portfolio and Performance"):
                     st.line_chart(history_df.set_index('time')['total_value'])
 
 st.markdown("---")
-st.info("This is a simulated paper trading app for educational purposes. Not financial advice. Always consult professionals.")
+st.info("This is not financial advice. Always consult professionals.")
