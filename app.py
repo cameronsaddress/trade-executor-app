@@ -244,4 +244,4 @@ with st.expander("View Portfolio and Performance"):
 
 st.markdown("---")
 st.info("This is a simulated paper trading app for educational purposes. Not financial advice. Always consult professionals.")
-```
+
