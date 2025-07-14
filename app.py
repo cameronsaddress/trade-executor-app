@@ -47,6 +47,73 @@ Additional Guidelines
 # API endpoint (confirmed from official docs)
 XAI_API_URL = "https://api.x.ai/v1/chat/completions"
 
+# Custom CSS for TradingView-like style: dark theme, cards with shadows, gradients, animations
+st.markdown("""
+    <style>
+    /* Global dark theme like TradingView */
+    body, .stApp {
+        background-color: #0E1117 !important;
+        color: #FAFAFA !important;
+        font-family: 'Arial', sans-serif;
+    }
+    h1, h2, h3, h4, h5, h6 {
+        color: #D4D4D4 !important;
+    }
+    .stButton > button {
+        background-color: #2962FF;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 0.5rem 1rem;
+        transition: background-color 0.3s;
+    }
+    .stButton > button:hover {
+        background-color: #0039CB;
+    }
+    /* Card style */
+    div[data-testid="column"] > div > div > div > div > div.block-container {
+        background-color: #1E212A !important;
+        border-radius: 8px;
+        padding: 1rem;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        margin-bottom: 1rem;
+    }
+    /* Header with gradient */
+    .card-header {
+        background: linear-gradient(90deg, #1E212A, #2A2D38);
+        padding: 0.5rem;
+        border-radius: 4px 4px 0 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .card-header h4 {
+        margin: 0;
+        color: #4CAF50; /* Green for buy, can dynamic */
+    }
+    /* Animated ticker placeholder */
+    .ticker {
+        font-size: 1.2rem;
+        color: #00E676;
+        animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+    /* Section dividers */
+    hr {
+        border-color: #2A2D38;
+    }
+    /* Info box */
+    .stAlert {
+        background-color: #1E212A !important;
+        color: #FAFAFA !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("Trade Opportunity Analysis: Grok 4 Heavy")
 
 with st.sidebar:
@@ -152,66 +219,84 @@ if st.session_state.recommendations is not None:
     df = st.session_state.recommendations
 
     for index, row in df.iterrows():
-        with st.container(border=True):  # Card-like container
-            st.markdown(f"#### {row['Symbol/Pair']} - {row['Action (Buy/Sell)']}")
+        with st.container():  # Card-like container with custom class
+            # Card header with symbol, action, and embedded TradingView ticker widget
+            symbol = row['Symbol/Pair']
+            action = row['Action (Buy/Sell)']
+            color = "#4CAF50" if action == "Buy" else "#F44336"  # Green for buy, red for sell
+            st.markdown(f"""
+                <div class="card-header" style="background: linear-gradient(90deg, #1E212A, #2A2D38);">
+                    <h4 style="color: {color};">{symbol} - {action}</h4>
+                    <div style="margin-left: auto;">
+                        <!-- TradingView Widget BEGIN -->
+                        <div class="tradingview-widget-container">
+                          <div class="tradingview-widget-container__widget"></div>
+                          <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-single-quote.js" async>
+                          {{
+                          "symbol": "{symbol}",
+                          "width": "200",
+                          "height": "100",
+                          "locale": "en",
+                          "dateRange": "1D",
+                          "colorTheme": "dark",
+                          "isTransparent": true,
+                          "autosize": false,
+                          "largeChartUrl": ""
+                          }}
+                          </script>
+                        </div>
+                        <!-- TradingView Widget END -->
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
             
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown("**Prices & Metrics**")
+                st.markdown('<p style="color: #D4D4D4; font-weight: bold;">Prices & Metrics</p>', unsafe_allow_html=True)
                 entry_price = row['Entry Price'] if pd.notna(row['Entry Price']) else 'N/A'
                 target_price = row['Target Price'] if pd.notna(row['Target Price']) else 'N/A'
                 stop_loss = row['Stop Loss'] if pd.notna(row['Stop Loss']) else 'N/A'
-                st.write(f"Entry Price: ${entry_price:.2f}" if isinstance(entry_price, (int, float)) else f"Entry Price: {entry_price}")
-                st.write(f"Target Price: ${target_price:.2f}" if isinstance(target_price, (int, float)) else f"Target Price: {target_price}")
-                st.write(f"Stop Loss: ${stop_loss:.2f}" if isinstance(stop_loss, (int, float)) else f"Stop Loss: {stop_loss}")
+                st.markdown(f'<p style="color: #FAFAFA;">Entry Price: ${entry_price:.2f}</p>' if isinstance(entry_price, (int, float)) else f'<p style="color: #FAFAFA;">Entry Price: {entry_price}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p style="color: #FAFAFA;">Target Price: ${target_price:.2f}</p>' if isinstance(target_price, (int, float)) else f'<p style="color: #FAFAFA;">Target Price: {target_price}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p style="color: #FAFAFA;">Stop Loss: ${stop_loss:.2f}</p>' if isinstance(stop_loss, (int, float)) else f'<p style="color: #FAFAFA;">Stop Loss: {stop_loss}</p>', unsafe_allow_html=True)
                 roi = row['Projected ROI (%)'] if pd.notna(row['Projected ROI (%)']) else 'N/A'
                 likelihood = row['Likelihood of Profit (%)'] if pd.notna(row['Likelihood of Profit (%)']) else 'N/A'
                 allocation = row['Recommended Allocation (% of portfolio)'] if pd.notna(row['Recommended Allocation (% of portfolio)']) else 'N/A'
-                st.write(f"Projected ROI: {roi:.2f}%" if isinstance(roi, (int, float)) else f"Projected ROI: {roi}")
-                st.write(f"Likelihood of Profit: {likelihood:.2f}%" if isinstance(likelihood, (int, float)) else f"Likelihood of Profit: {likelihood}")
-                st.write(f"Recommended Allocation: {allocation:.2f}%" if isinstance(allocation, (int, float)) else f"Recommended Allocation: {allocation}")
+                st.markdown(f'<p style="color: #FAFAFA;">Projected ROI: {roi:.2f}%</p>' if isinstance(roi, (int, float)) else f'<p style="color: #FAFAFA;">Projected ROI: {roi}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p style="color: #FAFAFA;">Likelihood of Profit: {likelihood:.2f}%</p>' if isinstance(likelihood, (int, float)) else f'<p style="color: #FAFAFA;">Likelihood of Profit: {likelihood}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p style="color: #FAFAFA;">Recommended Allocation: {allocation:.2f}%</p>' if isinstance(allocation, (int, float)) else f'<p style="color: #FAFAFA;">Recommended Allocation: {allocation}</p>', unsafe_allow_html=True)
             
             with col2:
-                st.markdown("**Timing & Sources**")
+                st.markdown('<p style="color: #D4D4D4; font-weight: bold;">Timing & Sources</p>', unsafe_allow_html=True)
                 entry_timing = row['Expected Entry Condition/Timing'] if pd.notna(row['Expected Entry Condition/Timing']) else 'N/A'
                 exit_timing = row['Expected Exit Condition/Timing'] if pd.notna(row['Expected Exit Condition/Timing']) else 'N/A'
                 data_sources = row['Data Sources'] if pd.notna(row['Data Sources']) else 'N/A'
-                st.write(f"Entry Timing: {entry_timing[:100] + '...' if isinstance(entry_timing, str) and len(entry_timing) > 100 else entry_timing}")
-                st.write(f"Exit Timing: {exit_timing[:100] + '...' if isinstance(exit_timing, str) and len(exit_timing) > 100 else exit_timing}")
-                st.write(f"Data Sources: {data_sources[:100] + '...' if isinstance(data_sources, str) and len(data_sources) > 100 else data_sources}")
+                st.markdown(f'<p style="color: #FAFAFA;">Entry Timing: {entry_timing[:100] + "..." if isinstance(entry_timing, str) and len(entry_timing) > 100 else entry_timing}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p style="color: #FAFAFA;">Exit Timing: {exit_timing[:100] + "..." if isinstance(exit_timing, str) and len(exit_timing) > 100 else exit_timing}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p style="color: #FAFAFA;">Data Sources: {data_sources[:100] + "..." if isinstance(data_sources, str) and len(data_sources) > 100 else data_sources}</p>', unsafe_allow_html=True)
             
-            st.markdown("**Technical Thesis**")
+            st.markdown('<p style="color: #D4D4D4; font-weight: bold;">Technical Thesis</p>', unsafe_allow_html=True)
             thesis = row['Thesis (≤50 words)'] if pd.notna(row['Thesis (≤50 words)']) else 'N/A'
-            st.write(thesis)
+            st.markdown(f'<p style="color: #FAFAFA;">{thesis}</p>', unsafe_allow_html=True)
             
-            st.markdown("**Plain English Summary**")
+            st.markdown('<p style="color: #D4D4D4; font-weight: bold;">Plain English Summary</p>', unsafe_allow_html=True)
             plain_summary = row['Plain English Summary (1 sentence)'] if pd.notna(row['Plain English Summary (1 sentence)']) else 'N/A'
-            st.write(plain_summary)
+            st.markdown(f'<p style="color: #FAFAFA;">{plain_summary}</p>', unsafe_allow_html=True)
             
-            # Buy/Sell button
-            action = row['Action (Buy/Sell)']
-            if st.button(f"{action} {row['Symbol/Pair']}"):
-                if not pd.isna(row['Entry Price']):
-                    entry_price = row['Entry Price']
-                    allocation_pct = row['Recommended Allocation (% of portfolio)'] / 100 if pd.notna(row['Recommended Allocation (% of portfolio)']) else 0.01
-                    quantity = (st.session_state.total_nav * allocation_pct) / entry_price
-                    new_position = {
-                        'Symbol/Pair': row['Symbol/Pair'],
-                        'Action': action,
-                        'Entry Price': entry_price,
-                        'Quantity': quantity,
-                        'Target Price': row['Target Price'] if pd.notna(row['Target Price']) else 'N/A',
-                        'Stop Loss': row['Stop Loss'] if pd.notna(row['Stop Loss']) else 'N/A',
-                        'Entry Time': time.strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    st.session_state.portfolio = pd.concat([st.session_state.portfolio, pd.DataFrame([new_position])], ignore_index=True)
-                    st.success(f"Paper trade placed: {action} {row['Symbol/Pair']}!")
-                else:
-                    st.error("Cannot place trade: Entry Price is unavailable.")
+            # Action button as hyperlink to Interactive Brokers (top-rated, supports advanced orders; pre-pop via their TWS but link to trade page)
+            # Note: Full pre-pop not supported publicly; linking to IBKR trade page for symbol
+            ibkr_symbol = symbol.replace('-USD', '').replace('=X', '')  # Format for IBKR
+            trade_url = f"https://www.interactivebrokers.com/en/trading/trade.php?symbol={ibkr_symbol}"
+            st.markdown(f"""
+                <a href="{trade_url}" target="_blank" style="background-color: #2962FF; color: white; padding: 0.5rem 1rem; border-radius: 4px; text-decoration: none; display: inline-block; transition: background-color 0.3s;">
+                    {action} {symbol} on Interactive Brokers
+                </a>
+                <p style="font-size: 0.8rem; color: #9E9E9E;">(Pre-populated order details may require manual entry; IBKR is top-rated for execution.)</p>
+            """, unsafe_allow_html=True)
 
     # Display summary paragraph
     st.markdown("### Market Summary")
-    st.write(st.session_state.summary)
+    st.markdown(f'<p style="color: #FAFAFA;">{st.session_state.summary}</p>', unsafe_allow_html=True)
 
 # Portfolio section (collapsed for simplicity)
 with st.expander("View Portfolio and Performance"):
