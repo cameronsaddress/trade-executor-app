@@ -1,10 +1,10 @@
 import streamlit as st
-import requests
 import pandas as pd
 import yfinance as yf
 from io import StringIO
 import time
 import datetime
+from grok import Grok
 
 # Hardcoded full prompt with enhancements for real-time tool usage, dynamic date, and comprehensive analysis
 # Escaped {asset} to {{asset}} to prevent KeyError during string formatting
@@ -40,9 +40,6 @@ Additional Guidelines
 [Keep similar, but add: "Include timing projections based on catalysts/technicals (e.g., 'Enter post-Fed announcement'). Backtest all projections for accuracy."]
 """
 
-# API endpoint from xAI docs
-XAI_API_URL = "https://api.x.ai/v1/chat/completions"
-
 st.title("Trade Opportunity Executor (Paper Trading)")
 
 api_key = st.text_input("Enter xAI Grok API Key", type="password")
@@ -55,6 +52,7 @@ if 'portfolio' not in st.session_state:
 
 if st.button("Generate Recommendations"):
     if api_key:
+        client = Grok(api_key=api_key)
         # Dynamic current date
         current_date = datetime.date.today().strftime("%B %d, %Y")
         formatted_prompt = PROMPT.format(current_date=current_date)
@@ -66,11 +64,14 @@ if st.button("Generate Recommendations"):
         for asset in key_assets:
             try:
                 data = yf.download(asset, period='1d', interval='1m')
-                current_price = data['Close'][-1]
-                current_data[asset] = {
-                    'price': current_price,
-                    'timestamp': data.index[-1].strftime("%Y-%m-%d %H:%M:%S")
-                }
+                if not data.empty:
+                    current_price = data['Close'][-1]
+                    current_data[asset] = {
+                        'price': current_price,
+                        'timestamp': data.index[-1].strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                else:
+                    current_data[asset] = {'error': 'No data found'}
             except Exception as e:
                 current_data[asset] = {'error': str(e)}
         st.json(current_data)  # Display pre-fetched data for transparency
@@ -78,49 +79,58 @@ if st.button("Generate Recommendations"):
         # Append pre-fetched data to prompt for LLM to use/validate against
         prompt_with_data = formatted_prompt + f"\n\nPre-Fetched Real-Time Data (use and validate against this): {current_data}. Integrate this with tool calls for full analysis."
 
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": "grok-4-heavy",  # Adjust based on your console; assuming this is the model name
-            "messages": [{"role": "user", "content": prompt_with_data}]
-        }
         try:
-            response = requests.post(XAI_API_URL, headers=headers, json=payload)
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
+            chat_completion = client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt_with_data,
+                    }
+                ],
+                model="grok-1", # Corrected model name
+            )
+            content = chat_completion.choices[0].message.content
             st.markdown("### Generated Recommendations")
             st.markdown(content)
 
             # Parse markdown table
             lines = content.strip().split('\n')
             if len(lines) > 2:
-                data_lines = lines[2:]  # Skip header and separator
-                csv_str = '\n'.join(data_lines)
-                df = pd.read_csv(StringIO(csv_str), sep='|', header=None, skipinitialspace=True, engine='python')
-                df.columns = ['empty1', 'Symbol/Pair', 'Action', 'Entry Price', 'Target Price', 'Stop Loss', 'Entry Condition', 'Exit Condition', 'Thesis', 'Projected ROI (%)', 'Recommended Allocation (% of portfolio)', 'Data Sources', 'empty2']
-                df = df.drop(['empty1', 'empty2'], axis=1, errors='ignore')
-                df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-                
-                # Post-generation validation: Check prices against live data
-                st.subheader("Validating Recommendations with Real-Time Data")
-                validated_df = df.copy()
-                for index, row in validated_df.iterrows():
-                    symbol = row['Symbol/Pair'].replace('/', '-')
-                    try:
-                        data = yf.download(symbol, period='1d', interval='1m')
-                        current_price = data['Close'][-1]
-                        suggested_entry = float(row['Entry Price'])
-                        if abs(current_price - suggested_entry) > 0.05 * suggested_entry:  # 5% tolerance
-                            validated_df.at[index, 'Validation'] = f"WARNING: Suggested {suggested_entry} vs. Live {current_price} (Mismatch! Overriding with live price.)"
-                            validated_df.at[index, 'Entry Price'] = current_price
-                        else:
-                            validated_df.at[index, 'Validation'] = f"OK: Matches live price {current_price}"
-                    except Exception:
-                        validated_df.at[index, 'Validation'] = "Fetch Error: Could not verify."
-                st.dataframe(validated_df)
-                st.session_state.recommendations = validated_df  # Use validated DF
+                data_lines = [line.strip() for line in lines[2:] if line.strip()] # Clean up lines
+                # Filter out lines that don't have the correct number of columns
+                data_lines = [line for line in data_lines if line.count('|') == 11]
+                if data_lines:
+                    csv_str = '\n'.join(data_lines)
+                    df = pd.read_csv(StringIO(csv_str), sep='|', header=None, skipinitialspace=True, engine='python')
+                    # Correctly assign columns based on the expected output
+                    df.columns = ['empty1', 'Symbol/Pair', 'Action', 'Entry Price', 'Target Price', 'Stop Loss', 'Entry Condition', 'Exit Condition', 'Thesis', 'Projected ROI (%)', 'Recommended Allocation (% of portfolio)', 'Data Sources', 'empty2']
+                    df = df.drop(['empty1', 'empty2'], axis=1, errors='ignore')
+
+                    df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+
+                    # Post-generation validation: Check prices against live data
+                    st.subheader("Validating Recommendations with Real-Time Data")
+                    validated_df = df.copy()
+                    for index, row in validated_df.iterrows():
+                        symbol = row['Symbol/Pair'].replace('/', '-')
+                        try:
+                            data = yf.download(symbol, period='1d', interval='1m')
+                            if not data.empty:
+                                current_price = data['Close'][-1]
+                                suggested_entry = float(row['Entry Price'])
+                                if abs(current_price - suggested_entry) > 0.05 * suggested_entry:  # 5% tolerance
+                                    validated_df.at[index, 'Validation'] = f"WARNING: Suggested {suggested_entry} vs. Live {current_price} (Mismatch! Overriding with live price.)"
+                                    validated_df.at[index, 'Entry Price'] = current_price
+                                else:
+                                    validated_df.at[index, 'Validation'] = f"OK: Matches live price {current_price}"
+                            else:
+                                validated_df.at[index, 'Validation'] = "Fetch Error: Could not verify."
+                        except Exception:
+                            validated_df.at[index, 'Validation'] = "Fetch Error: Could not verify."
+                    st.dataframe(validated_df)
+                    st.session_state.recommendations = validated_df  # Use validated DF
+                else:
+                    st.error("No valid data found in the table.")
             else:
                 st.error("No table found in response.")
         except Exception as e:
@@ -162,16 +172,24 @@ if st.button("Update Portfolio Values & Track"):
             symbol = row['Symbol/Pair'].replace('/', '-')  # Format for yfinance
             try:
                 data = yf.download(symbol, period='1d', interval='1m')
-                current_price = data['Close'][-1]
-                value = current_price * row['Quantity']
-                profit_pct = ((current_price - row['Entry Price']) / row['Entry Price'] * 100) if row['Action'] == 'Buy' else ((row['Entry Price'] - current_price) / row['Entry Price'] * 100)
-                current_values.append({
-                    'Symbol/Pair': row['Symbol/Pair'],
-                    'Current Price': current_price,
-                    'Value': value,
-                    'Profit %': profit_pct
-                })
-                total_value += value
+                if not data.empty:
+                    current_price = data['Close'][-1]
+                    value = current_price * row['Quantity']
+                    profit_pct = ((current_price - row['Entry Price']) / row['Entry Price'] * 100) if row['Action'] == 'Buy' else ((row['Entry Price'] - current_price) / row['Entry Price'] * 100)
+                    current_values.append({
+                        'Symbol/Pair': row['Symbol/Pair'],
+                        'Current Price': current_price,
+                        'Value': value,
+                        'Profit %': profit_pct
+                    })
+                    total_value += value
+                else:
+                    current_values.append({
+                        'Symbol/Pair': row['Symbol/Pair'],
+                        'Current Price': 'Fetch Error',
+                        'Value': 'N/A',
+                        'Profit %': 'N/A'
+                    })
             except Exception:
                 current_values.append({
                     'Symbol/Pair': row['Symbol/Pair'],
