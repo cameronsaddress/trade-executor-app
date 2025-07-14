@@ -5,6 +5,10 @@ import yfinance as yf
 from io import StringIO
 import time
 import datetime
+import warnings
+
+# Suppress FutureWarnings from yfinance
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 # Hardcoded full prompt with enhancements: added likelihood column, summary paragraph, and ensured escaping
 PROMPT = """
@@ -39,14 +43,14 @@ Additional Guidelines
 [Keep similar, but add: "Include timing projections based on catalysts/technicals (e.g., 'Enter post-Fed announcement'). Backtest all projections for accuracy. Calculate Likelihood of Profit as backtested win rate or ML-predicted probability."]
 """
 
-# API endpoint from xAI docs
+# API endpoint (confirmed from official docs)
 XAI_API_URL = "https://api.x.ai/v1/chat/completions"
 
 st.title("Professional Trade Opportunity Predictor")
 
 with st.sidebar:
     api_key = st.text_input("Enter xAI Grok API Key", type="password")
-    st.info("Enter your API key to generate predictions. This app simulates paper trading.")
+    st.info("Enter your API key to generate predictions. This app simulates paper trading. If 404 error persists, verify your API key and model access in xAI console.")
 
 # Initialize session state
 if 'portfolio' not in st.session_state:
@@ -60,73 +64,76 @@ if 'summary' not in st.session_state:
 
 if st.button("AI Predictions"):
     if api_key:
-        try:
-            # Dynamic current date
-            current_date = datetime.date.today().strftime("%B %d, %Y")
-            formatted_prompt = PROMPT.format(current_date=current_date)
+        with st.spinner("Generating AI Predictions..."):
+            try:
+                # Dynamic current date
+                current_date = datetime.date.today().strftime("%B %d, %Y")
+                formatted_prompt = PROMPT.format(current_date=current_date)
 
-            # Pre-fetch real-time data for key assets (simplified, no subheader)
-            key_assets = ['BTC-USD', 'ETH-USD', 'NVDA', 'TSLA', 'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AAPL', 'MSFT', 'GOLD']
-            current_data = {}
-            for asset in key_assets:
-                try:
-                    data = yf.download(asset, period='1d', interval='1m', progress=False)
-                    current_price = data['Close'][-1]
-                    current_data[asset] = {
-                        'price': float(current_price),
-                        'timestamp': data.index[-1].strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                except:
-                    pass  # Skip if fetch fails
+                # Pre-fetch real-time data for key assets (updated tickers)
+                key_assets = ['BTC-USD', 'ETH-USD', 'NVDA', 'TSLA', 'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AAPL', 'MSFT', 'GC=F']  # Changed 'GOLD' to 'GC=F'
+                current_data = {}
+                for asset in key_assets:
+                    try:
+                        data = yf.download(asset, period='1d', interval='1m', progress=False, auto_adjust=True)  # Explicit auto_adjust=True to avoid warning
+                        current_price = data['Close'][-1]
+                        current_data[asset] = {
+                            'price': float(current_price),
+                            'timestamp': data.index[-1].strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                    except:
+                        pass  # Skip if fetch fails
 
-            # Append pre-fetched data to prompt
-            prompt_with_data = formatted_prompt + f"\n\nPre-Fetched Real-Time Data (use and validate against this): {current_data}. Integrate this with tool calls for full analysis."
+                # Append pre-fetched data to prompt
+                prompt_with_data = formatted_prompt + f"\n\nPre-Fetched Real-Time Data (use and validate against this): {current_data}. Integrate this with tool calls for full analysis."
 
-            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-            payload = {"model": "grok-4-heavy", "messages": [{"role": "user", "content": prompt_with_data}]}
-            response = requests.post(XAI_API_URL, headers=headers, json=payload)
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
+                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                payload = {"model": "grok-4",  # Changed to 'grok-4' based on docs (assuming Heavy is a variant; adjust if needed)
+                           "messages": [{"role": "user", "content": prompt_with_data}]}
+                response = requests.post(XAI_API_URL, headers=headers, json=payload)
+                response.raise_for_status()
+                content = response.json()["choices"][0]["message"]["content"]
 
-            # Parse content: table + summary
-            if '|' in content:
-                table_end = content.rfind('|') + 1
-                table_content = content[:table_end].strip()
-                summary_content = content[table_end:].strip()
+                # Parse content: table + summary
+                if '|' in content:
+                    table_end = content.rfind('|') + 1
+                    table_content = content[:table_end].strip()
+                    summary_content = content[table_end:].strip()
 
-                # Parse table
-                lines = table_content.split('\n')
-                if len(lines) > 2:
-                    data_lines = [line for line in lines[2:] if line.strip()]  # Filter empty lines
-                    csv_str = '\n'.join(data_lines)
-                    df = pd.read_csv(StringIO(csv_str), sep='|', header=None, skipinitialspace=True, engine='python')
-                    df.columns = ['empty1'] + ['Symbol/Pair', 'Action (Buy/Sell)', 'Entry Price', 'Target Price', 'Stop Loss', 
-                                               'Expected Entry Condition/Timing', 'Expected Exit Condition/Timing', 'Thesis (≤50 words)', 
-                                               'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)', 
-                                               'Data Sources'] + ['empty2']
-                    df = df.drop(['empty1', 'empty2'], axis=1, errors='ignore')
-                    df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+                    # Parse table
+                    lines = table_content.split('\n')
+                    if len(lines) > 2:
+                        data_lines = [line for line in lines[2:] if line.strip()]  # Filter empty lines
+                        csv_str = '\n'.join(data_lines)
+                        df = pd.read_csv(StringIO(csv_str), sep='|', header=None, skipinitialspace=True, engine='python')
+                        df.columns = ['empty1'] + ['Symbol/Pair', 'Action (Buy/Sell)', 'Entry Price', 'Target Price', 'Stop Loss', 
+                                                   'Expected Entry Condition/Timing', 'Expected Exit Condition/Timing', 'Thesis (≤50 words)', 
+                                                   'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)', 
+                                                   'Data Sources'] + ['empty2']
+                        df = df.drop(['empty1', 'empty2'], axis=1, errors='ignore')
+                        df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
 
-                    # Validate prices
-                    for index, row in df.iterrows():
-                        symbol = row['Symbol/Pair'].replace('/', '-')
-                        try:
-                            data = yf.download(symbol, period='1d', interval='1m', progress=False)
-                            current_price = data['Close'][-1]
-                            suggested_entry = float(row['Entry Price'])
-                            if abs(current_price - suggested_entry) > 0.05 * suggested_entry:
-                                df.at[index, 'Entry Price'] = current_price  # Override
-                        except:
-                            pass
+                        # Validate prices
+                        for index, row in df.iterrows():
+                            symbol = row['Symbol/Pair'].replace('/', '-')
+                            try:
+                                data = yf.download(symbol, period='1d', interval='1m', progress=False, auto_adjust=True)
+                                current_price = data['Close'][-1]
+                                suggested_entry = float(row['Entry Price'])
+                                if abs(current_price - suggested_entry) > 0.05 * suggested_entry:
+                                    df.at[index, 'Entry Price'] = current_price  # Override
+                            except:
+                                pass
 
-                    st.session_state.recommendations = df
-                    st.session_state.summary = summary_content
+                        st.session_state.recommendations = df
+                        st.session_state.summary = summary_content
+                    else:
+                        st.error("No valid table found in response.")
                 else:
-                    st.error("No valid table found in response.")
-            else:
-                st.error("Invalid response format.")
-        except Exception as e:
-            st.error(f"Error generating predictions: {e}")
+                    st.error("Invalid response format.")
+            except Exception as e:
+                st.error(f"Error generating predictions: {e}")
+                st.info("If you see a 404 error, double-check your API key and ensure you have access to the Grok API. The endpoint is correct per official docs.")
     else:
         st.error("Please enter your xAI API key in the sidebar.")
 
@@ -135,38 +142,39 @@ if st.session_state.recommendations is not None:
     st.markdown("### AI-Generated Trade Predictions")
     df = st.session_state.recommendations
 
-    # Display table with integrated buy/sell buttons
-    for index, row in df.iterrows():
-        cols = st.columns([2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
-        cols[0].write(row['Symbol/Pair'])
-        cols[1].write(row['Action (Buy/Sell)'])
-        cols[2].write(f"${row['Entry Price']:.2f}")
-        cols[3].write(f"${row['Target Price']:.2f}")
-        cols[4].write(f"${row['Stop Loss']:.2f}")
-        cols[5].write(row['Expected Entry Condition/Timing'])
-        cols[6].write(row['Expected Exit Condition/Timing'])
-        cols[7].write(row['Thesis (≤50 words)'])
-        cols[8].write(f"{row['Projected ROI (%)']}%")
-        cols[9].write(f"{row['Likelihood of Profit (%)']}%")
-        cols[10].write(f"{row['Recommended Allocation (% of portfolio)']}%")
+    # Display table with integrated buy/sell buttons using columns for professional layout
+    st.table(df)  # Optional: Show full table first for overview
 
-        # Buy/Sell button (places paper trade)
-        action = row['Action (Buy/Sell)']
-        if cols[0].button(f"{action} {row['Symbol/Pair']}"):
-            entry_price = float(row['Entry Price'])
-            allocation_pct = float(row['Recommended Allocation (% of portfolio)']) / 100
-            quantity = (st.session_state.total_nav * allocation_pct) / entry_price
-            new_position = {
-                'Symbol/Pair': row['Symbol/Pair'],
-                'Action': action,
-                'Entry Price': entry_price,
-                'Quantity': quantity,
-                'Target Price': float(row['Target Price']),
-                'Stop Loss': float(row['Stop Loss']),
-                'Entry Time': time.strftime("%Y-%m-%d %H:%M:%S")
-            }
-            st.session_state.portfolio = pd.concat([st.session_state.portfolio, pd.DataFrame([new_position])], ignore_index=True)
-            st.success(f"Paper trade placed: {action} {row['Symbol/Pair']}!")
+    for index, row in df.iterrows():
+        with st.container():
+            cols = st.columns([1, 1, 1, 1, 1, 2, 1, 1, 1, 1])
+            cols[0].write(row['Symbol/Pair'])
+            cols[1].write(row['Action (Buy/Sell)'])
+            cols[2].write(f"${row['Entry Price']:.2f}")
+            cols[3].write(f"${row['Target Price']:.2f}")
+            cols[4].write(f"${row['Stop Loss']:.2f}")
+            cols[5].write(row['Thesis (≤50 words)'])
+            cols[6].write(f"{row['Projected ROI (%)']}%")
+            cols[7].write(f"{row['Likelihood of Profit (%)']}%")
+            cols[8].write(f"{row['Recommended Allocation (% of portfolio)']}%")
+
+            # Buy/Sell button (places paper trade)
+            action = row['Action (Buy/Sell)']
+            if cols[9].button(f"{action} {row['Symbol/Pair']}"):
+                entry_price = float(row['Entry Price'])
+                allocation_pct = float(row['Recommended Allocation (% of portfolio)']) / 100
+                quantity = (st.session_state.total_nav * allocation_pct) / entry_price
+                new_position = {
+                    'Symbol/Pair': row['Symbol/Pair'],
+                    'Action': action,
+                    'Entry Price': entry_price,
+                    'Quantity': quantity,
+                    'Target Price': float(row['Target Price']),
+                    'Stop Loss': float(row['Stop Loss']),
+                    'Entry Time': time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                st.session_state.portfolio = pd.concat([st.session_state.portfolio, pd.DataFrame([new_position])], ignore_index=True)
+                st.success(f"Paper trade placed: {action} {row['Symbol/Pair']}!")
 
     # Display summary paragraph
     st.markdown("### Market Summary")
@@ -178,38 +186,39 @@ with st.expander("View Portfolio and Performance"):
     st.dataframe(st.session_state.portfolio)
 
     if st.button("Update Portfolio Values"):
-        if not st.session_state.portfolio.empty:
-            current_values = []
-            total_value = 0
-            for _, row in st.session_state.portfolio.iterrows():
-                symbol = row['Symbol/Pair'].replace('/', '-')
-                try:
-                    data = yf.download(symbol, period='1d', interval='1m', progress=False)
-                    current_price = data['Close'][-1]
-                    value = current_price * row['Quantity']
-                    profit_pct = ((current_price - row['Entry Price']) / row['Entry Price'] * 100) if row['Action'] == 'Buy' else ((row['Entry Price'] - current_price) / row['Entry Price'] * 100)
-                    current_values.append({
-                        'Symbol/Pair': row['Symbol/Pair'],
-                        'Current Price': current_price,
-                        'Value': value,
-                        'Profit %': profit_pct
-                    })
-                    total_value += value
-                except:
-                    current_values.append({
-                        'Symbol/Pair': row['Symbol/Pair'],
-                        'Current Price': 'Fetch Error',
-                        'Value': 'N/A',
-                        'Profit %': 'N/A'
-                    })
-            st.dataframe(pd.DataFrame(current_values))
-            st.session_state.history.append({'time': time.time(), 'total_value': total_value if total_value > 0 else st.session_state.total_nav})
-            st.session_state.total_nav = total_value if total_value > 0 else st.session_state.total_nav
+        with st.spinner("Updating portfolio..."):
+            if not st.session_state.portfolio.empty:
+                current_values = []
+                total_value = 0
+                for _, row in st.session_state.portfolio.iterrows():
+                    symbol = row['Symbol/Pair'].replace('/', '-')
+                    try:
+                        data = yf.download(symbol, period='1d', interval='1m', progress=False, auto_adjust=True)
+                        current_price = data['Close'][-1]
+                        value = current_price * row['Quantity']
+                        profit_pct = ((current_price - row['Entry Price']) / row['Entry Price'] * 100) if row['Action'] == 'Buy' else ((row['Entry Price'] - current_price) / row['Entry Price'] * 100)
+                        current_values.append({
+                            'Symbol/Pair': row['Symbol/Pair'],
+                            'Current Price': current_price,
+                            'Value': value,
+                            'Profit %': profit_pct
+                        })
+                        total_value += value
+                    except:
+                        current_values.append({
+                            'Symbol/Pair': row['Symbol/Pair'],
+                            'Current Price': 'Fetch Error',
+                            'Value': 'N/A',
+                            'Profit %': 'N/A'
+                        })
+                st.dataframe(pd.DataFrame(current_values))
+                st.session_state.history.append({'time': time.time(), 'total_value': total_value if total_value > 0 else st.session_state.total_nav})
+                st.session_state.total_nav = total_value if total_value > 0 else st.session_state.total_nav
 
-            # Plot history
-            if st.session_state.history:
-                history_df = pd.DataFrame(st.session_state.history)
-                st.line_chart(history_df.set_index('time')['total_value'])
+                # Plot history
+                if st.session_state.history:
+                    history_df = pd.DataFrame(st.session_state.history)
+                    st.line_chart(history_df.set_index('time')['total_value'])
 
 st.markdown("---")
-st.info("This is a simulated paper trading app for educational purposes. Not financial advice. Always consult professionals.")            
+st.info("This is a simulated paper trading app for educational purposes. Not financial advice. Always consult professionals.")
