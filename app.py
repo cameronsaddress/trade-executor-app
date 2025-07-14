@@ -98,7 +98,7 @@ if st.button("Generate Recommendations"):
                             "content": prompt_with_data,
                         }
                     ],
-                    model="grok-1", # Corrected model name
+                    model="grok-4-heavy", # Corrected model name
                 )
                 content = chat_completion.choices[0].message.content
             else:
@@ -107,7 +107,7 @@ if st.button("Generate Recommendations"):
                     "Content-Type": "application/json"
                 }
                 payload = {
-                    "model": "grok-1",  # Corrected model name
+                    "model": "grok-4-heavy",  # Corrected model name
                     "messages": [{"role": "user", "content": prompt_with_data}]
                 }
                 response = requests.post(XAI_API_URL, headers=headers, json=payload)
