@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 import requests
 import pandas as pd
@@ -113,15 +114,20 @@ if st.button("AI Predictions"):
                         df = df.drop(['empty1', 'empty2'], axis=1, errors='ignore')
                         df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
 
-                        # Validate prices
+                        # Convert numeric columns to float to avoid formatting errors
+                        numeric_cols = ['Entry Price', 'Target Price', 'Stop Loss', 'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)']
+                        for col in numeric_cols:
+                            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+                        # Validate and override prices if needed
                         for index, row in df.iterrows():
                             symbol = row['Symbol/Pair'].replace('/', '-')
                             try:
                                 data = yf.download(symbol, period='1d', interval='1m', progress=False, auto_adjust=True)
                                 current_price = data['Close'][-1]
-                                suggested_entry = float(row['Entry Price'])
+                                suggested_entry = row['Entry Price']
                                 if abs(current_price - suggested_entry) > 0.05 * suggested_entry:
-                                    df.at[index, 'Entry Price'] = current_price  # Override
+                                    df.at[index, 'Entry Price'] = current_price  # Override with live price
                             except:
                                 pass
 
@@ -140,37 +146,54 @@ if st.button("AI Predictions"):
 # Display recommendations if available
 if st.session_state.recommendations is not None:
     st.markdown("### AI-Generated Trade Predictions")
+
     df = st.session_state.recommendations
 
-    # Display table with integrated buy/sell buttons using columns for professional layout
-    st.table(df)  # Optional: Show full table first for overview
-
     for index, row in df.iterrows():
-        with st.container():
-            cols = st.columns([1, 1, 1, 1, 1, 2, 1, 1, 1, 1])
-            cols[0].write(row['Symbol/Pair'])
-            cols[1].write(row['Action (Buy/Sell)'])
-            cols[2].write(f"${row['Entry Price']:.2f}")
-            cols[3].write(f"${row['Target Price']:.2f}")
-            cols[4].write(f"${row['Stop Loss']:.2f}")
-            cols[5].write(row['Thesis (≤50 words)'])
-            cols[6].write(f"{row['Projected ROI (%)']}%")
-            cols[7].write(f"{row['Likelihood of Profit (%)']}%")
-            cols[8].write(f"{row['Recommended Allocation (% of portfolio)']}%")
-
-            # Buy/Sell button (places paper trade)
+        with st.container(border=True):  # Card-like container
+            st.markdown(f"**{row['Symbol/Pair']}** - {row['Action (Buy/Sell)']}")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown("**Entry Price**")
+                st.write(f"${row['Entry Price']:.2f}")
+                st.markdown("**Target Price**")
+                st.write(f"${row['Target Price']:.2f}")
+                st.markdown("**Stop Loss**")
+                st.write(f"${row['Stop Loss']:.2f}")
+            
+            with col2:
+                st.markdown("**Projected ROI**")
+                st.write(f"{row['Projected ROI (%)']:.2f}%")
+                st.markdown("**Likelihood of Profit**")
+                st.write(f"{row['Likelihood of Profit (%)']:.2f}%")
+                st.markdown("**Recommended Allocation**")
+                st.write(f"{row['Recommended Allocation (% of portfolio)']:.2f}%")
+            
+            with col3:
+                st.markdown("**Entry Timing**")
+                st.write(row['Expected Entry Condition/Timing'][:50] + '...' if len(row['Expected Entry Condition/Timing']) > 50 else row['Expected Entry Condition/Timing'])
+                st.markdown("**Exit Timing**")
+                st.write(row['Expected Exit Condition/Timing'][:50] + '...' if len(row['Expected Exit Condition/Timing']) > 50 else row['Expected Exit Condition/Timing'])
+                st.markdown("**Data Sources**")
+                st.write(row['Data Sources'][:50] + '...' if pd.notna(row['Data Sources']) and len(row['Data Sources']) > 50 else row['Data Sources'])
+            
+            st.markdown("**Thesis**")
+            st.write(row['Thesis (≤50 words)'])
+            
+            # Buy/Sell button
             action = row['Action (Buy/Sell)']
-            if cols[9].button(f"{action} {row['Symbol/Pair']}"):
-                entry_price = float(row['Entry Price'])
-                allocation_pct = float(row['Recommended Allocation (% of portfolio)']) / 100
+            if st.button(f"{action} {row['Symbol/Pair']}"):
+                entry_price = row['Entry Price']
+                allocation_pct = row['Recommended Allocation (% of portfolio)'] / 100
                 quantity = (st.session_state.total_nav * allocation_pct) / entry_price
                 new_position = {
                     'Symbol/Pair': row['Symbol/Pair'],
                     'Action': action,
                     'Entry Price': entry_price,
                     'Quantity': quantity,
-                    'Target Price': float(row['Target Price']),
-                    'Stop Loss': float(row['Stop Loss']),
+                    'Target Price': row['Target Price'],
+                    'Stop Loss': row['Stop Loss'],
                     'Entry Time': time.strftime("%Y-%m-%d %H:%M:%S")
                 }
                 st.session_state.portfolio = pd.concat([st.session_state.portfolio, pd.DataFrame([new_position])], ignore_index=True)
@@ -222,3 +245,4 @@ with st.expander("View Portfolio and Performance"):
 
 st.markdown("---")
 st.info("This is a simulated paper trading app for educational purposes. Not financial advice. Always consult professionals.")
+```
