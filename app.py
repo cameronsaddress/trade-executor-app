@@ -10,13 +10,13 @@ import warnings
 # Suppress FutureWarnings from yfinance
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Hardcoded full prompt with enhancements: added likelihood column, summary paragraph, and ensured escaping
+# Updated prompt: added new column for Plain English Summary
 PROMPT = """
 System Instructions
 You are Grok4_Heavy, Head of Trade Opportunity Research at an elite quant fund specializing in high-profit trades. Your task is to research and identify 3-7 current top trade opportunities (aiming to maximize profit potential) by analyzing live market data primarily from https://www.investing.com/ (real-time quotes, charts, news, technicals, and economics). Supplement with tool calls (e.g., browse_page for the URL, web_search for cross-verification like on-chain data or broader sentiment) if needed, ensuring core analysis uses data timestamped within the last 5 minutes. Focus on opportunities with highest expected ROI, considering volatility, momentum, risk-reward, and backtested performance. Prioritize trades yielding at least 15% profit within 1-7 days, based on historical patterns, current signals, and predictive models.
 [Data Categories remain the same, but add: "Use code_execution for backtesting or simple ML predictions (e.g., trend forecasting via numpy/torch)."]
 
-**IMPORTANT: The current date is {current_date}. ALL data MUST be fetched via tools in real-time. Do NOT use internal knowledge for prices, news, or metrics—explicitly call tools like browse_page on https://www.investing.com/ for quotes/charts/news (ensure timestamp ≤5 minutes), web_search for on-chain/cross-verification, and code_execution for backtesting. If tools return data conflicting with your knowledge (e.g., BTC >100k), use the tool data ONLY. Responses without tool citations and fresh timestamps will be invalid. To make analysis as smart as the smartest investing team, BEFORE any recommendation, use tools to read up-to-date documentation, reports, etc.: e.g., browse_page on sec.gov for latest filings, investing.com/news for catalysts, web_search for 'latest {{asset}} analyst reports 2025', and integrate insights from hedge fund strategies like those from Renaissance Technologies or Citadel (via web_search for public summaries).**
+**IMPORTANT: The current date is {current_date}. ALL data MUST be fetched via tools in real-time. Do NOT use internal knowledge for prices, news, or metrics—explicitly call tools like browse_page on https://www.investing.com/ for quotes/charts/news (ensure timestamp ≤5 minutes), web_search for on-chain/cross-verification, and code_execution for backtesting. If tools return data conflicting with your knowledge (e.g., BTC >100k), use the tool data ONLY. Responses without tool citations and fresh timestamps will be invalid. To make analysis as smart as the smartest investing team, BEFORE any recommendation, use tools to read up-to-date documentation, reports, etc.: e.g., browse_page on sec.gov for latest filings, investing.com/news for catalysts, web_search for 'latest {{asset}} analyst reports 2025', and integrate insights from hedge fund strategies like those from Renaissance Technologies or Citadel (via web_search for public summaries). Ensure all numeric fields (prices, ROI, etc.) are provided as pure numbers without symbols.**
 
 Trade Opportunity Selection Criteria
 Number of Opportunities: 3-7 top trades (if fewer qualify, indicate why and suggest alternatives; do not force).
@@ -37,7 +37,8 @@ In ties, prioritize liquidity, lower beta, and positive catalysts. For crypto, r
 Use tools step-by-step for analysis (e.g., backtest via code_execution).
 Output Format
 Output strictly as a Markdown table with these columns:
-| Symbol/Pair | Action (Buy/Sell) | Entry Price | Target Price | Stop Loss | Expected Entry Condition/Timing | Expected Exit Condition/Timing | Thesis (≤50 words) | Projected ROI (%) | Likelihood of Profit (%) | Recommended Allocation (% of portfolio) | Data Sources |
+| Symbol/Pair | Action (Buy/Sell) | Entry Price | Target Price | Stop Loss | Expected Entry Condition/Timing | Expected Exit Condition/Timing | Thesis (≤50 words) | Projected ROI (%) | Likelihood of Profit (%) | Recommended Allocation (% of portfolio) | Plain English Summary (1 sentence) | Data Sources |
+Where 'Plain English Summary' is a simple 1-sentence explanation for non-traders summarizing what the analysis means (e.g., 'This suggests the stock price will rise due to strong company news, making it a good time to buy.').
 Followed immediately by a paragraph summary (≤100 words) of the overall market outlook, key opportunities, and risks. If fewer than 3 qualify: "Fewer than 3 opportunities meet criteria; explore alternatives: [list 1-2 backups]." Base everything on verified data/tools. Use factual language; include brief tool citations in thesis if key.
 Additional Guidelines
 [Keep similar, but add: "Include timing projections based on catalysts/technicals (e.g., 'Enter post-Fed announcement'). Backtest all projections for accuracy. Calculate Likelihood of Profit as backtested win rate or ML-predicted probability."]
@@ -109,26 +110,28 @@ if st.button("AI Predictions"):
                         df.columns = ['empty1'] + ['Symbol/Pair', 'Action (Buy/Sell)', 'Entry Price', 'Target Price', 'Stop Loss', 
                                                    'Expected Entry Condition/Timing', 'Expected Exit Condition/Timing', 'Thesis (≤50 words)', 
                                                    'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)', 
-                                                   'Data Sources'] + ['empty2']
+                                                   'Plain English Summary (1 sentence)', 'Data Sources'] + ['empty2']
                         df = df.drop(['empty1', 'empty2'], axis=1, errors='ignore')
                         df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
 
-                        # Convert numeric columns to float to avoid formatting errors
+                        # Convert numeric columns to float, handling errors
                         numeric_cols = ['Entry Price', 'Target Price', 'Stop Loss', 'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)']
                         for col in numeric_cols:
                             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-                        # Validate and override prices if needed
+                        # Validate and fill NaN prices with live data where possible
                         for index, row in df.iterrows():
-                            symbol = row['Symbol/Pair'].replace('/', '-')
-                            try:
-                                data = yf.download(symbol, period='1d', interval='1m', progress=False, auto_adjust=True)
-                                current_price = data['Close'][-1]
-                                suggested_entry = row['Entry Price']
-                                if abs(current_price - suggested_entry) > 0.05 * suggested_entry:
-                                    df.at[index, 'Entry Price'] = current_price  # Override with live price
-                            except:
-                                pass
+                            if pd.isna(row['Entry Price']):
+                                symbol = row['Symbol/Pair'].replace('/', '-')
+                                try:
+                                    data = yf.download(symbol, period='1d', interval='1m', progress=False, auto_adjust=True)
+                                    current_price = data['Close'][-1]
+                                    df.at[index, 'Entry Price'] = current_price
+                                except:
+                                    df.at[index, 'Entry Price'] = float('nan')  # Keep as NaN if fetch fails
+
+                        # Drop rows with too many NaNs (e.g., if >50% NaN)
+                        df = df.dropna(thresh=len(df.columns) * 0.5)
 
                         st.session_state.recommendations = df
                         st.session_state.summary = summary_content
@@ -150,53 +153,61 @@ if st.session_state.recommendations is not None:
 
     for index, row in df.iterrows():
         with st.container(border=True):  # Card-like container
-            st.markdown(f"**{row['Symbol/Pair']}** - {row['Action (Buy/Sell)']}")
+            st.markdown(f"#### {row['Symbol/Pair']} - {row['Action (Buy/Sell)']}")
             
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
-                st.markdown("**Entry Price**")
-                st.write(f"${row['Entry Price']:.2f}")
-                st.markdown("**Target Price**")
-                st.write(f"${row['Target Price']:.2f}")
-                st.markdown("**Stop Loss**")
-                st.write(f"${row['Stop Loss']:.2f}")
+                st.markdown("**Prices & Metrics**")
+                entry_price = row['Entry Price'] if pd.notna(row['Entry Price']) else 'N/A'
+                target_price = row['Target Price'] if pd.notna(row['Target Price']) else 'N/A'
+                stop_loss = row['Stop Loss'] if pd.notna(row['Stop Loss']) else 'N/A'
+                st.write(f"Entry Price: ${entry_price:.2f}" if isinstance(entry_price, (int, float)) else f"Entry Price: {entry_price}")
+                st.write(f"Target Price: ${target_price:.2f}" if isinstance(target_price, (int, float)) else f"Target Price: {target_price}")
+                st.write(f"Stop Loss: ${stop_loss:.2f}" if isinstance(stop_loss, (int, float)) else f"Stop Loss: {stop_loss}")
+                roi = row['Projected ROI (%)'] if pd.notna(row['Projected ROI (%)']) else 'N/A'
+                likelihood = row['Likelihood of Profit (%)'] if pd.notna(row['Likelihood of Profit (%)']) else 'N/A'
+                allocation = row['Recommended Allocation (% of portfolio)'] if pd.notna(row['Recommended Allocation (% of portfolio)']) else 'N/A'
+                st.write(f"Projected ROI: {roi:.2f}%" if isinstance(roi, (int, float)) else f"Projected ROI: {roi}")
+                st.write(f"Likelihood of Profit: {likelihood:.2f}%" if isinstance(likelihood, (int, float)) else f"Likelihood of Profit: {likelihood}")
+                st.write(f"Recommended Allocation: {allocation:.2f}%" if isinstance(allocation, (int, float)) else f"Recommended Allocation: {allocation}")
             
             with col2:
-                st.markdown("**Projected ROI**")
-                st.write(f"{row['Projected ROI (%)']:.2f}%")
-                st.markdown("**Likelihood of Profit**")
-                st.write(f"{row['Likelihood of Profit (%)']:.2f}%")
-                st.markdown("**Recommended Allocation**")
-                st.write(f"{row['Recommended Allocation (% of portfolio)']:.2f}%")
+                st.markdown("**Timing & Sources**")
+                entry_timing = row['Expected Entry Condition/Timing'] if pd.notna(row['Expected Entry Condition/Timing']) else 'N/A'
+                exit_timing = row['Expected Exit Condition/Timing'] if pd.notna(row['Expected Exit Condition/Timing']) else 'N/A'
+                data_sources = row['Data Sources'] if pd.notna(row['Data Sources']) else 'N/A'
+                st.write(f"Entry Timing: {entry_timing[:100] + '...' if isinstance(entry_timing, str) and len(entry_timing) > 100 else entry_timing}")
+                st.write(f"Exit Timing: {exit_timing[:100] + '...' if isinstance(exit_timing, str) and len(exit_timing) > 100 else exit_timing}")
+                st.write(f"Data Sources: {data_sources[:100] + '...' if isinstance(data_sources, str) and len(data_sources) > 100 else data_sources}")
             
-            with col3:
-                st.markdown("**Entry Timing**")
-                st.write(row['Expected Entry Condition/Timing'][:50] + '...' if len(row['Expected Entry Condition/Timing']) > 50 else row['Expected Entry Condition/Timing'])
-                st.markdown("**Exit Timing**")
-                st.write(row['Expected Exit Condition/Timing'][:50] + '...' if len(row['Expected Exit Condition/Timing']) > 50 else row['Expected Exit Condition/Timing'])
-                st.markdown("**Data Sources**")
-                st.write(row['Data Sources'][:50] + '...' if pd.notna(row['Data Sources']) and len(row['Data Sources']) > 50 else row['Data Sources'])
+            st.markdown("**Technical Thesis**")
+            thesis = row['Thesis (≤50 words)'] if pd.notna(row['Thesis (≤50 words)']) else 'N/A'
+            st.write(thesis)
             
-            st.markdown("**Thesis**")
-            st.write(row['Thesis (≤50 words)'])
+            st.markdown("**Plain English Summary**")
+            plain_summary = row['Plain English Summary (1 sentence)'] if pd.notna(row['Plain English Summary (1 sentence)']) else 'N/A'
+            st.write(plain_summary)
             
             # Buy/Sell button
             action = row['Action (Buy/Sell)']
             if st.button(f"{action} {row['Symbol/Pair']}"):
-                entry_price = row['Entry Price']
-                allocation_pct = row['Recommended Allocation (% of portfolio)'] / 100
-                quantity = (st.session_state.total_nav * allocation_pct) / entry_price
-                new_position = {
-                    'Symbol/Pair': row['Symbol/Pair'],
-                    'Action': action,
-                    'Entry Price': entry_price,
-                    'Quantity': quantity,
-                    'Target Price': row['Target Price'],
-                    'Stop Loss': row['Stop Loss'],
-                    'Entry Time': time.strftime("%Y-%m-%d %H:%M:%S")
-                }
-                st.session_state.portfolio = pd.concat([st.session_state.portfolio, pd.DataFrame([new_position])], ignore_index=True)
-                st.success(f"Paper trade placed: {action} {row['Symbol/Pair']}!")
+                if not pd.isna(row['Entry Price']):
+                    entry_price = row['Entry Price']
+                    allocation_pct = row['Recommended Allocation (% of portfolio)'] / 100 if pd.notna(row['Recommended Allocation (% of portfolio)']) else 0.01
+                    quantity = (st.session_state.total_nav * allocation_pct) / entry_price
+                    new_position = {
+                        'Symbol/Pair': row['Symbol/Pair'],
+                        'Action': action,
+                        'Entry Price': entry_price,
+                        'Quantity': quantity,
+                        'Target Price': row['Target Price'] if pd.notna(row['Target Price']) else 'N/A',
+                        'Stop Loss': row['Stop Loss'] if pd.notna(row['Stop Loss']) else 'N/A',
+                        'Entry Time': time.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    st.session_state.portfolio = pd.concat([st.session_state.portfolio, pd.DataFrame([new_position])], ignore_index=True)
+                    st.success(f"Paper trade placed: {action} {row['Symbol/Pair']}!")
+                else:
+                    st.error("Cannot place trade: Entry Price is unavailable.")
 
     # Display summary paragraph
     st.markdown("### Market Summary")
@@ -244,4 +255,3 @@ with st.expander("View Portfolio and Performance"):
 
 st.markdown("---")
 st.info("This is a simulated paper trading app for educational purposes. Not financial advice. Always consult professionals.")
-
