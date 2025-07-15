@@ -11,10 +11,10 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # Function to load and format the prompt from prompt.txt
-def load_prompt(current_date):
+def load_prompt(current_date, next_day):
     with open('prompt.txt', 'r') as f:
         prompt_template = f.read()
-    return prompt_template.format(current_date=current_date)
+    return prompt_template.format(current_date=current_date, next_day=next_day)
 
 # API endpoint (confirmed from official docs)
 XAI_API_URL = "https://api.x.ai/v1/chat/completions"
@@ -108,15 +108,29 @@ if st.button("AI Predictions"):
     if api_key:
         with st.spinner("Generating AI Predictions..."):
             try:
-                # Dynamic current date
-                current_date = datetime.date.today().strftime("%B %d, %Y")
-                formatted_prompt = load_prompt(current_date)
+                # Dynamic current date and next day
+                current_date_obj = datetime.date.today()
+                current_date = current_date_obj.strftime("%B %d, %Y")
+                next_day_obj = current_date_obj + datetime.timedelta(days=1)
+                next_day = next_day_obj.strftime("%B %d, %Y")
+                formatted_prompt = load_prompt(current_date, next_day)
 
-                # Removed pre-fetch logic as per user request to not pre-check certain assets
+                # Pre-fetch real-time data for key assets (updated tickers)
+                key_assets = ['BTC-USD', 'ETH-USD', 'NVDA', 'TSLA', 'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AAPL', 'MSFT', 'GC=F']  # Changed 'GOLD' to 'GC=F'
+                current_data = {}
+                for asset in key_assets:
+                    try:
+                        data = yf.download(asset, period='1d', interval='1m', progress=False, auto_adjust=True)  # Explicit auto_adjust=True to avoid warning
+                        current_price = data['Close'][-1]
+                        current_data[asset] = {
+                            'price': float(current_price),
+                            'timestamp': data.index[-1].strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                    except:
+                        pass  # Skip if fetch fails
 
-                # Append pre-fetched data to prompt (commented out as pre-fetch removed)
-                # prompt_with_data = formatted_prompt + f"\n\nPre-Fetched Real-Time Data (use and validate against this): {current_data}. Integrate this with tool calls for full analysis."
-                prompt_with_data = formatted_prompt  # Use raw formatted prompt without pre-fetch
+                # Append pre-fetched data to prompt
+                prompt_with_data = formatted_prompt + f"\n\nPre-Fetched Real-Time Data (use and validate against this): {current_data}. Integrate this with tool calls for full analysis."
 
                 headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
                 payload = {"model": "grok-4",  # Changed to 'grok-4' based on docs (assuming Heavy is a variant; adjust if needed)
