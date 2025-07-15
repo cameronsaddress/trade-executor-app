@@ -159,21 +159,31 @@ if st.button("AI Predictions"):
                         data_lines = [line for line in lines[2:] if line.strip()]  # Filter empty lines
                         csv_str = '\n'.join(data_lines)
                         df = pd.read_csv(StringIO(csv_str), sep='|', header=None, skipinitialspace=True, engine='python')
-                        df.columns = ['empty1'] + ['Symbol/Pair', 'Action (Buy/Sell)', 'Entry Price', 'Target Price', 'Stop Loss', 
-                                                   'Expected Entry Condition/Timing', 'Expected Exit Condition/Timing', 'Thesis (≤50 words)', 
-                                                   'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)', 
-                                                   'Plain English Summary (1 sentence)', 'Data Sources'] + ['empty2']
-                        df = df.drop(['empty1', 'empty2'], axis=1, errors='ignore')
+                        # Dynamically assign columns based on actual shape, dropping empty ones
+                        df = df.dropna(how='all', axis=1)  # Drop empty columns
+                        expected_columns = ['Symbol/Pair', 'Action (Buy/Sell)', 'Entry Price', 'Target Price', 'Stop Loss', 
+                                            'Expected Entry Condition/Timing', 'Expected Exit Condition/Timing', 'Thesis (≤50 words)', 
+                                            'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)', 
+                                            'Plain English Summary (1 sentence)', 'Data Sources']
+                        num_cols = len(df.columns)
+                        if num_cols == len(expected_columns) + 2:  # Assuming two empties
+                            df.columns = ['empty1'] + expected_columns + ['empty2']
+                            df = df.drop(['empty1', 'empty2'], axis=1)
+                        elif num_cols == len(expected_columns):
+                            df.columns = expected_columns
+                        else:
+                            raise ValueError(f"Unexpected number of columns: {num_cols}. Expected around {len(expected_columns)}.")
                         df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
 
                         # Convert numeric columns to float, handling errors
                         numeric_cols = ['Entry Price', 'Target Price', 'Stop Loss', 'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)']
                         for col in numeric_cols:
-                            df[col] = pd.to_numeric(df[col], errors='coerce')
+                            if col in df.columns:
+                                df[col] = pd.to_numeric(df[col], errors='coerce')
 
                         # Validate and fill NaN prices with live data where possible
                         for index, row in df.iterrows():
-                            if pd.isna(row['Entry Price']):
+                            if 'Entry Price' in df.columns and pd.isna(row['Entry Price']):
                                 symbol = row['Symbol/Pair'].replace('/', '-')
                                 try:
                                     data = yf.download(symbol, period='1d', interval='1m', progress=False, auto_adjust=True)
