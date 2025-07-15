@@ -10,40 +10,11 @@ import warnings
 # Suppress FutureWarnings from yfinance
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Improved prompt: Emphasize fetching from 5 top sites with today's data only, cross-verification, and comprehensive report
-PROMPT = """
-System Instructions
-You are Grok4_Heavy, Head of Trade Opportunity Research at an elite quant fund specializing in high-profit trades. Your task is to research and identify 3-7 current top trade opportunities (aiming to maximize profit potential) by analyzing live market data from the top 5 highest-ranked sites for real-time financial data: https://www.investing.com/, https://finance.yahoo.com/, https://www.google.com/finance/, https://www.bloomberg.com/markets, https://www.cnbc.com/quotes. For each asset, explicitly browse_page on relevant URLs from ALL 5 sites (e.g., for BTC/USD: https://www.investing.com/crypto/bitcoin, https://finance.yahoo.com/quote/BTC-USD, https://www.google.com/finance/quote/BTC-USD, https://www.bloomberg.com/quote/BTCUSD:CUR, https://www.cnbc.com/quotes/BTC.CB=) to fetch and cross-verify real-time quotes, charts, news, technicals, and economics. Ensure ALL data is strictly from today ({current_date}) and timestamped within the last 5 minutes—discard any older data. Cross-verify consistency across sites (e.g., if prices differ, use the median and note discrepancies). Supplement with tool calls (e.g., web_search for on-chain/cross-verification like 'bitcoin on-chain data {current_date}') if needed. Focus on opportunities with highest expected ROI, considering volatility, momentum, risk-reward, and backtested performance. Prioritize trades yielding at least 15% profit within 1-7 days, based on historical patterns, current signals, and predictive models.
-[Data Categories remain the same, but add: "Use code_execution for backtesting or simple ML predictions (e.g., trend forecasting via numpy/torch)."]
-
-**IMPORTANT: The current date is {current_date}. ALL data MUST be fetched via tools in real-time FROM TODAY ONLY. Do NOT use internal knowledge or any data not explicitly fetched and timestamped today—explicitly call browse_page on each of the 5 sites for every asset analyzed (ensure timestamp ≤5 minutes from {current_date}), web_search for on-chain/cross-verification with date filter 'site:glassnode.com bitcoin metrics {current_date}', and code_execution for backtesting using only historical data up to yesterday but projections based on today's fetches. If tools return data conflicting with your knowledge (e.g., BTC >100k), use the tool data ONLY. Responses without tool citations, fresh timestamps from today, and cross-verification from all 5 sites will be invalid. BEFORE any recommendation, compile a comprehensive report: Gather data from the 5 sites, combine into an extremely advanced analysis (e.g., compare RSI/MACD across sources, sentiment from news, on-chain metrics), and provide an expert synthesis that analyzes discrepancies, trends, and implications like a top-tier hedge fund team.**
-
-Trade Opportunity Selection Criteria
-Number of Opportunities: 3-7 top trades (if fewer qualify, indicate why and suggest alternatives; do not force).
-Goal: Maximize profit with projected ROI >25% in 1-7 days, minimizing downside (max drawdown <8% based on ATR/historical). Balance exposure: max 25% per asset class.
-Hard Filters:
-* Data timestamp ≤5 minutes (primarily from URL, verified via tools).
-* Projected Profit ≥15% (based on technical targets, backtested).
-* Risk-Reward ≥1:4.
-* Liquidity: Avg Daily Volume ≥1M shares/units.
-* Volatility: IV/HV 25-75%.
-* Diversification: Max 2 per class; at least one each from stocks, forex, crypto if possible; correlation <0.5.
-* Trend Alignment: RSI >55 for buys/<45 for sells; MACD crossover; backtested win rate ≥60% over 6 months.
-Selection Rules
-Rank by profit_score = (projected_ROI * risk_reward_ratio) + (momentum_score * 0.5) + (sentiment_score * 0.3) + (volume_z_score * 0.2) + (backtest_factor * 0.4), normalized from data/tools.
-Ensure balance of buys/sells; prioritize catalysts (e.g., earnings in 1-3 days). Avoid correlated assets.
-Net Impact: Total risk ≤4% of $100,000 NAV.
-In ties, prioritize liquidity, lower beta, and positive catalysts. For crypto, require on-chain spikes via tools.
-Use tools step-by-step for analysis (e.g., backtest via code_execution).
-Output Format
-First, a Comprehensive Report section (≤500 words) synthesizing data from the 5 sites and tools into an advanced expert analysis, combining all sources, analyzing trends/discrepancies, and providing insights.
-Then, strictly as a Markdown table with these columns:
-| Symbol/Pair | Action (Buy/Sell) | Entry Price | Target Price | Stop Loss | Expected Entry Condition/Timing | Expected Exit Condition/Timing | Thesis (≤50 words) | Projected ROI (%) | Likelihood of Profit (%) | Recommended Allocation (% of portfolio) | Plain English Summary (1 sentence) | Data Sources |
-Where 'Plain English Summary' is a simple 1-sentence explanation for non-traders summarizing what the analysis means (e.g., 'This suggests the stock price will rise due to strong company news, making it a good time to buy.').
-Followed immediately by a paragraph summary (≤100 words) of the overall market outlook, key opportunities, and risks. If fewer than 3 qualify: "Fewer than 3 opportunities meet criteria; explore alternatives: [list 1-2 backups]." Base everything on verified data/tools. Use factual language; include brief tool citations in thesis if key.
-Additional Guidelines
-[Keep similar, but add: "Include timing projections based on catalysts/technicals (e.g., 'Enter post-Fed announcement'). Backtest all projections for accuracy. Calculate Likelihood of Profit as backtested win rate or ML-predicted probability."]
-"""
+# Function to load and format the prompt from prompt.txt
+def load_prompt(current_date):
+    with open('prompt.txt', 'r') as f:
+        prompt_template = f.read()
+    return prompt_template.format(current_date=current_date)
 
 # API endpoint (confirmed from official docs)
 XAI_API_URL = "https://api.x.ai/v1/chat/completions"
@@ -139,24 +110,13 @@ if st.button("AI Predictions"):
             try:
                 # Dynamic current date
                 current_date = datetime.date.today().strftime("%B %d, %Y")
-                formatted_prompt = PROMPT.format(current_date=current_date)
+                formatted_prompt = load_prompt(current_date)
 
-                # Pre-fetch real-time data for key assets (updated tickers)
-                key_assets = ['BTC-USD', 'ETH-USD', 'NVDA', 'TSLA', 'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AAPL', 'MSFT', 'GC=F']  # Changed 'GOLD' to 'GC=F'
-                current_data = {}
-                for asset in key_assets:
-                    try:
-                        data = yf.download(asset, period='1d', interval='1m', progress=False, auto_adjust=True)  # Explicit auto_adjust=True to avoid warning
-                        current_price = data['Close'][-1]
-                        current_data[asset] = {
-                            'price': float(current_price),
-                            'timestamp': data.index[-1].strftime("%Y-%m-%d %H:%M:%S")
-                        }
-                    except:
-                        pass  # Skip if fetch fails
+                # Removed pre-fetch logic as per user request to not pre-check certain assets
 
-                # Append pre-fetched data to prompt
-                prompt_with_data = formatted_prompt + f"\n\nPre-Fetched Real-Time Data (use and validate against this): {current_data}. Integrate this with tool calls for full analysis."
+                # Append pre-fetched data to prompt (commented out as pre-fetch removed)
+                # prompt_with_data = formatted_prompt + f"\n\nPre-Fetched Real-Time Data (use and validate against this): {current_data}. Integrate this with tool calls for full analysis."
+                prompt_with_data = formatted_prompt  # Use raw formatted prompt without pre-fetch
 
                 headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
                 payload = {"model": "grok-4",  # Changed to 'grok-4' based on docs (assuming Heavy is a variant; adjust if needed)
