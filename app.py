@@ -175,12 +175,12 @@ if st.button("AI Predictions"):
                         elif num_cols == len(expected_columns):
                             df.columns = expected_columns
                         elif num_cols < len(expected_columns):
-                            # Assign available and fill missing with NaN
+                            # Assign available and fill missing with NA
                             df.columns = expected_columns[:num_cols]
                             for missing_col in expected_columns[num_cols:]:
                                 df[missing_col] = pd.NA
                         else:
-                            # Truncate extra columns
+                            # Truncate extra columns and assign expected
                             df = df.iloc[:, :len(expected_columns)]
                             df.columns = expected_columns
                         
