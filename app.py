@@ -159,20 +159,31 @@ if st.button("AI Predictions"):
                         data_lines = [line for line in lines[2:] if line.strip()]  # Filter empty lines
                         csv_str = '\n'.join(data_lines)
                         df = pd.read_csv(StringIO(csv_str), sep='|', header=None, skipinitialspace=True, engine='python')
-                        # Dynamically assign columns based on actual shape, dropping empty ones
-                        df = df.dropna(how='all', axis=1)  # Drop empty columns
+                        # Drop completely empty columns
+                        df = df.dropna(how='all', axis=1)
+                        
+                        # Expected columns (13 total)
                         expected_columns = ['Symbol/Pair', 'Action (Buy/Sell)', 'Entry Price', 'Target Price', 'Stop Loss', 
                                             'Expected Entry Condition/Timing', 'Expected Exit Condition/Timing', 'Thesis (≤50 words)', 
                                             'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)', 
                                             'Plain English Summary (1 sentence)', 'Data Sources']
+
                         num_cols = len(df.columns)
                         if num_cols == len(expected_columns) + 2:  # Assuming two empties
                             df.columns = ['empty1'] + expected_columns + ['empty2']
                             df = df.drop(['empty1', 'empty2'], axis=1)
                         elif num_cols == len(expected_columns):
                             df.columns = expected_columns
+                        elif num_cols < len(expected_columns):
+                            # Assign available and fill missing with NaN
+                            df.columns = expected_columns[:num_cols]
+                            for missing_col in expected_columns[num_cols:]:
+                                df[missing_col] = pd.NA
                         else:
-                            raise ValueError(f"Unexpected number of columns: {num_cols}. Expected around {len(expected_columns)}.")
+                            # Truncate extra columns
+                            df = df.iloc[:, :len(expected_columns)]
+                            df.columns = expected_columns
+                        
                         df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
 
                         # Convert numeric columns to float, handling errors
@@ -262,28 +273,28 @@ if st.session_state.recommendations is not None:
                 st.markdown(f'<p style="color: #FAFAFA;">Entry Price: ${entry_price:.2f}</p>' if isinstance(entry_price, (int, float)) else f'<p style="color: #FAFAFA;">Entry Price: {entry_price}</p>', unsafe_allow_html=True)
                 st.markdown(f'<p style="color: #FAFAFA;">Target Price: ${target_price:.2f}</p>' if isinstance(target_price, (int, float)) else f'<p style="color: #FAFAFA;">Target Price: {target_price}</p>', unsafe_allow_html=True)
                 st.markdown(f'<p style="color: #FAFAFA;">Stop Loss: ${stop_loss:.2f}</p>' if isinstance(stop_loss, (int, float)) else f'<p style="color: #FAFAFA;">Stop Loss: {stop_loss}</p>', unsafe_allow_html=True)
-                roi = row['Projected ROI (%)'] if pd.notna(row['Projected ROI (%)']) else 'N/A'
-                likelihood = row['Likelihood of Profit (%)'] if pd.notna(row['Likelihood of Profit (%)']) else 'N/A'
-                allocation = row['Recommended Allocation (% of portfolio)'] if pd.notna(row['Recommended Allocation (% of portfolio)']) else 'N/A'
+                roi = row.get('Projected ROI (%)', 'N/A')
+                likelihood = row.get('Likelihood of Profit (%)', 'N/A')
+                allocation = row.get('Recommended Allocation (% of portfolio)', 'N/A')
                 st.markdown(f'<p style="color: #FAFAFA;">Projected ROI: {roi:.2f}%</p>' if isinstance(roi, (int, float)) else f'<p style="color: #FAFAFA;">Projected ROI: {roi}</p>', unsafe_allow_html=True)
                 st.markdown(f'<p style="color: #FAFAFA;">Likelihood of Profit: {likelihood:.2f}%</p>' if isinstance(likelihood, (int, float)) else f'<p style="color: #FAFAFA;">Likelihood of Profit: {likelihood}</p>', unsafe_allow_html=True)
                 st.markdown(f'<p style="color: #FAFAFA;">Recommended Allocation: {allocation:.2f}%</p>' if isinstance(allocation, (int, float)) else f'<p style="color: #FAFAFA;">Recommended Allocation: {allocation}</p>', unsafe_allow_html=True)
             
             with col2:
                 st.markdown('<p style="color: #D4D4D4; font-weight: bold;">Timing & Sources</p>', unsafe_allow_html=True)
-                entry_timing = row['Expected Entry Condition/Timing'] if pd.notna(row['Expected Entry Condition/Timing']) else 'N/A'
-                exit_timing = row['Expected Exit Condition/Timing'] if pd.notna(row['Expected Exit Condition/Timing']) else 'N/A'
-                data_sources = row['Data Sources'] if pd.notna(row['Data Sources']) else 'N/A'
+                entry_timing = row.get('Expected Entry Condition/Timing', 'N/A')
+                exit_timing = row.get('Expected Exit Condition/Timing', 'N/A')
+                data_sources = row.get('Data Sources', 'N/A')
                 st.markdown(f'<p style="color: #FAFAFA;">Entry Timing: {entry_timing[:100] + "..." if isinstance(entry_timing, str) and len(entry_timing) > 100 else entry_timing}</p>', unsafe_allow_html=True)
                 st.markdown(f'<p style="color: #FAFAFA;">Exit Timing: {exit_timing[:100] + "..." if isinstance(exit_timing, str) and len(exit_timing) > 100 else exit_timing}</p>', unsafe_allow_html=True)
                 st.markdown(f'<p style="color: #FAFAFA;">Data Sources: {data_sources[:100] + "..." if isinstance(data_sources, str) and len(data_sources) > 100 else data_sources}</p>', unsafe_allow_html=True)
             
             st.markdown('<p style="color: #D4D4D4; font-weight: bold;">Technical Thesis</p>', unsafe_allow_html=True)
-            thesis = row['Thesis (≤50 words)'] if pd.notna(row['Thesis (≤50 words)']) else 'N/A'
+            thesis = row.get('Thesis (≤50 words)', 'N/A')
             st.markdown(f'<p style="color: #FAFAFA;">{thesis}</p>', unsafe_allow_html=True)
             
             st.markdown('<p style="color: #D4D4D4; font-weight: bold;">Plain English Summary</p>', unsafe_allow_html=True)
-            plain_summary = row['Plain English Summary (1 sentence)'] if pd.notna(row['Plain English Summary (1 sentence)']) else 'N/A'
+            plain_summary = row.get('Plain English Summary (1 sentence)', 'N/A')
             st.markdown(f'<p style="color: #FAFAFA;">{plain_summary}</p>', unsafe_allow_html=True)
             
             # Action button as hyperlink to Interactive Brokers (top-rated, supports advanced orders; pre-pop via their TWS but link to trade page)
