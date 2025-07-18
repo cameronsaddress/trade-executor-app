@@ -6,6 +6,18 @@ from io import StringIO
 import time
 import datetime
 import warnings
+import json
+from typing import Dict, List, Any
+
+# Import the tool functions
+from tools import (
+    fetch_current_price,
+    search_web_for_news,
+    browse_page_for_data,
+    validate_data,
+    code_execution_for_backtest,
+    get_onchain_metrics
+)
 
 # Suppress FutureWarnings from yfinance
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -18,6 +30,254 @@ def load_prompt(current_date, next_day):
 
 # API endpoint (confirmed from official docs)
 XAI_API_URL = "https://api.x.ai/v1/chat/completions"
+
+# Define tools schema for Grok 4 API
+TOOLS_SCHEMA = [
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_current_price",
+            "description": "Fetch current price for a given symbol using yfinance. Validates data is <5 minutes old.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Stock/crypto symbol (e.g., 'AAPL', 'BTC-USD')"
+                    }
+                },
+                "required": ["symbol"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_web_for_news",
+            "description": "Search for financial news with date filtering. Returns news items with timestamps.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query string"
+                    },
+                    "after_date": {
+                        "type": "string",
+                        "description": "Start date in YYYY-MM-DD format"
+                    },
+                    "before_date": {
+                        "type": "string",
+                        "description": "End date in YYYY-MM-DD format"
+                    }
+                },
+                "required": ["query", "after_date", "before_date"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browse_page_for_data",
+            "description": "Fetch webpage content and extract data based on instructions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL to fetch"
+                    },
+                    "instructions": {
+                        "type": "string",
+                        "description": "Instructions for what data to extract"
+                    }
+                },
+                "required": ["url", "instructions"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_data",
+            "description": "Validate if data is fresh enough based on timestamp.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "description": "Data dict containing a 'timestamp' field"
+                    },
+                    "max_age_hours": {
+                        "type": "integer",
+                        "description": "Maximum age in hours (default 12)"
+                    }
+                },
+                "required": ["data"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "code_execution_for_backtest",
+            "description": "Safely execute Python code for backtesting. Restricts to safe libraries.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Python code to execute"
+                    }
+                },
+                "required": ["code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_onchain_metrics",
+            "description": "Fetch on-chain metrics for crypto assets using CoinGecko API.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "asset": {
+                        "type": "string",
+                        "description": "Cryptocurrency symbol (e.g., 'bitcoin', 'ethereum')"
+                    },
+                    "metric": {
+                        "type": "string",
+                        "description": "Metric to fetch (e.g., 'market_cap', 'volume', 'circulating_supply')"
+                    }
+                },
+                "required": ["asset", "metric"]
+            }
+        }
+    }
+]
+
+# Tool execution function mapping
+TOOL_FUNCTIONS = {
+    "fetch_current_price": fetch_current_price,
+    "search_web_for_news": search_web_for_news,
+    "browse_page_for_data": browse_page_for_data,
+    "validate_data": validate_data,
+    "code_execution_for_backtest": code_execution_for_backtest,
+    "get_onchain_metrics": get_onchain_metrics
+}
+
+def execute_tool_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Execute a tool call and return the result.
+    
+    Args:
+        tool_call: Dict containing tool call information
+        
+    Returns:
+        Dict containing tool execution result
+    """
+    try:
+        function_name = tool_call["function"]["name"]
+        arguments = json.loads(tool_call["function"]["arguments"])
+        
+        # Execute the corresponding function
+        if function_name in TOOL_FUNCTIONS:
+            result = TOOL_FUNCTIONS[function_name](**arguments)
+            return {
+                "tool_call_id": tool_call["id"],
+                "role": "tool",
+                "name": function_name,
+                "content": json.dumps(result, indent=2)
+            }
+        else:
+            return {
+                "tool_call_id": tool_call["id"],
+                "role": "tool",
+                "name": function_name,
+                "content": json.dumps({"error": f"Unknown function: {function_name}"})
+            }
+    except Exception as e:
+        return {
+            "tool_call_id": tool_call["id"],
+            "role": "tool",
+            "name": function_name,
+            "content": json.dumps({"error": f"Tool execution failed: {str(e)}"})
+        }
+
+def execute_with_tools(api_key: str, initial_prompt: str, max_iterations: int = 10) -> tuple[str, List[Dict[str, Any]]]:
+    """
+    Execute the tool-calling loop with the AI API.
+    
+    Args:
+        api_key: API key for authentication
+        initial_prompt: Initial user prompt
+        max_iterations: Maximum tool call iterations to prevent infinite loops
+        
+    Returns:
+        Tuple of (final_content, tool_history)
+    """
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    # Initialize conversation with user message
+    messages = [{"role": "user", "content": initial_prompt}]
+    tool_history = []
+    iteration = 0
+    
+    while iteration < max_iterations:
+        # Prepare request payload
+        payload = {
+            "model": "grok-4",
+            "messages": messages,
+            "tools": TOOLS_SCHEMA,
+            "tool_choice": "auto",
+            "max_tokens": 4096
+        }
+        
+        # Make API request
+        try:
+            response = requests.post(XAI_API_URL, headers=headers, json=payload, timeout=120)
+            response.raise_for_status()
+            response_data = response.json()
+        except requests.exceptions.Timeout:
+            return None, [{"error": "API request timeout"}]
+        except Exception as e:
+            return None, [{"error": f"API request failed: {str(e)}"}]
+        
+        # Extract the assistant's response
+        assistant_message = response_data["choices"][0]["message"]
+        messages.append(assistant_message)
+        
+        # Check if the response contains tool calls
+        if assistant_message.get("tool_calls"):
+            # Process tool calls
+            tool_results = []
+            for tool_call in assistant_message["tool_calls"]:
+                # Execute tool and get result
+                tool_result = execute_tool_call(tool_call)
+                tool_results.append(tool_result)
+                
+                # Track tool history
+                tool_history.append({
+                    "tool": tool_call["function"]["name"],
+                    "input": json.loads(tool_call["function"]["arguments"]),
+                    "result": tool_result["content"],
+                    "timestamp": datetime.datetime.now().isoformat()
+                })
+            
+            # Add tool results to conversation
+            messages.extend(tool_results)
+            iteration += 1
+        else:
+            # No tool calls, this is the final response
+            final_content = assistant_message.get("content", "")
+            return final_content, tool_history
+    
+    # Max iterations reached
+    return "Maximum tool iterations reached", tool_history
 
 # Custom CSS for TradingView-like style: dark theme, cards with shadows, gradients, animations
 st.markdown("""
@@ -106,7 +366,7 @@ if 'report' not in st.session_state:
 
 if st.button("AI Predictions"):
     if api_key:
-        with st.spinner("Generating AI Predictions..."):
+        with st.spinner("Generating AI Predictions with Real-Time Data..."):
             try:
                 # Dynamic current date and next day
                 current_date_obj = datetime.date.today()
@@ -116,104 +376,117 @@ if st.button("AI Predictions"):
                 formatted_prompt = load_prompt(current_date, next_day)
 
                 # Pre-fetch real-time data for key assets (updated tickers)
-                key_assets = ['BTC-USD', 'ETH-USD', 'NVDA', 'TSLA', 'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AAPL', 'MSFT', 'GC=F']  # Changed 'GOLD' to 'GC=F'
+                key_assets = ['BTC-USD', 'ETH-USD', 'NVDA', 'TSLA', 'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AAPL', 'MSFT', 'GC=F']
                 current_data = {}
                 for asset in key_assets:
                     try:
-                        data = yf.download(asset, period='1d', interval='1m', progress=False, auto_adjust=True)  # Explicit auto_adjust=True to avoid warning
+                        data = yf.download(asset, period='1d', interval='1m', progress=False, auto_adjust=True)
                         current_price = data['Close'][-1]
                         current_data[asset] = {
                             'price': float(current_price),
                             'timestamp': data.index[-1].strftime("%Y-%m-%d %H:%M:%S")
                         }
-                    except:
+                    except Exception:
                         pass  # Skip if fetch fails
 
                 # Append pre-fetched data to prompt
                 prompt_with_data = formatted_prompt + f"\n\nPre-Fetched Real-Time Data (use and validate against this): {current_data}. Integrate this with tool calls for full analysis."
 
-                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-                payload = {"model": "grok-4",  # Changed to 'grok-4' based on docs (assuming Heavy is a variant; adjust if needed)
-                           "messages": [{"role": "user", "content": prompt_with_data}]}
-                response = requests.post(XAI_API_URL, headers=headers, json=payload)
-                response.raise_for_status()
-                content = response.json()["choices"][0]["message"]["content"]
-
-                # Parse content: report + table + summary
-                # Assume report ends with a marker, e.g., '--- End of Report ---', but since not, use heuristics: find start of table
-                table_start = content.find('|')
-                if table_start != -1:
-                    report_content = content[:table_start].strip() if table_start > 0 else ''
-                    table_end = content.rfind('|') + 1
-                    table_content = content[table_start:table_end].strip()
-                    summary_content = content[table_end:].strip()
-                else:
-                    report_content = ''
-                    table_content = ''
-                    summary_content = content.strip()
-
-                # Parse table if present
-                if table_content:
-                    lines = table_content.split('\n')
-                    if len(lines) > 2:
-                        data_lines = [line for line in lines[2:] if line.strip()]  # Filter empty lines
-                        csv_str = '\n'.join(data_lines)
-                        df = pd.read_csv(StringIO(csv_str), sep='|', header=None, skipinitialspace=True, engine='python')
-                        # Drop completely empty columns
-                        df = df.dropna(how='all', axis=1)
-                        
-                        # Expected columns (13 total)
-                        expected_columns = ['Symbol/Pair', 'Action (Buy/Sell)', 'Entry Price', 'Target Price', 'Stop Loss', 
-                                            'Expected Entry Condition/Timing', 'Expected Exit Condition/Timing', 'Thesis (≤50 words)', 
-                                            'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)', 
-                                            'Plain English Summary (1 sentence)', 'Data Sources']
-
-                        num_cols = len(df.columns)
-                        if num_cols == len(expected_columns) + 2:  # Assuming two empties
-                            df.columns = ['empty1'] + expected_columns + ['empty2']
-                            df = df.drop(['empty1', 'empty2'], axis=1)
-                        elif num_cols == len(expected_columns):
-                            df.columns = expected_columns
-                        elif num_cols < len(expected_columns):
-                            # Assign available and fill missing with NA
-                            df.columns = expected_columns[:num_cols]
-                            for missing_col in expected_columns[num_cols:]:
-                                df[missing_col] = pd.NA
-                        else:
-                            # Truncate extra columns and assign expected
-                            df = df.iloc[:, :len(expected_columns)]
-                            df.columns = expected_columns
-                        
-                        df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-
-                        # Convert numeric columns to float, handling errors
-                        numeric_cols = ['Entry Price', 'Target Price', 'Stop Loss', 'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)']
-                        for col in numeric_cols:
-                            if col in df.columns:
-                                df[col] = pd.to_numeric(df[col], errors='coerce')
-
-                        # Validate and fill NaN prices with live data where possible
-                        for index, row in df.iterrows():
-                            if 'Entry Price' in df.columns and pd.isna(row['Entry Price']):
-                                symbol = row['Symbol/Pair'].replace('/', '-')
-                                try:
-                                    data = yf.download(symbol, period='1d', interval='1m', progress=False, auto_adjust=True)
-                                    current_price = data['Close'][-1]
-                                    df.at[index, 'Entry Price'] = current_price
-                                except:
-                                    df.at[index, 'Entry Price'] = float('nan')  # Keep as NaN if fetch fails
-
-                        # Drop rows with too many NaNs (e.g., if >50% NaN)
-                        df = df.dropna(thresh=len(df.columns) * 0.5)
-
-                        st.session_state.recommendations = df
+                # Execute with tool-calling loop
+                final_content, tool_history = execute_with_tools(api_key, prompt_with_data)
+                
+                # Display tool execution history in expander
+                with st.expander("View Tool Execution History"):
+                    st.markdown("**Tool Calls Made:**")
+                    for i, tool_call in enumerate(tool_history, 1):
+                        st.markdown(f"**{i}. {tool_call['tool']}**")
+                        st.json(tool_call['input'])
+                        st.markdown(f"**Result:** {tool_call['result'][:500]}..." if len(tool_call['result']) > 500 else f"**Result:** {tool_call['result']}")
+                        st.markdown(f"**Timestamp:** {tool_call['timestamp']}")
+                        st.markdown("---")
+                
+                # Check if we got a valid response
+                if final_content:
+                    content = final_content
+                    
+                    # Parse content: report + table + summary
+                    table_start = content.find('|')
+                    if table_start != -1:
+                        report_content = content[:table_start].strip() if table_start > 0 else ''
+                        table_end = content.rfind('|') + 1
+                        table_content = content[table_start:table_end].strip()
+                        summary_content = content[table_end:].strip()
                     else:
-                        st.error("No valid table found in response.")
-                else:
-                    st.error("No table found in response.")
+                        report_content = ''
+                        table_content = ''
+                        summary_content = content.strip()
 
-                st.session_state.report = report_content
-                st.session_state.summary = summary_content
+                    # Parse table if present
+                    if table_content:
+                        lines = table_content.split('\n')
+                        if len(lines) > 2:
+                            data_lines = [line for line in lines[2:] if line.strip()]  # Filter empty lines
+                            csv_str = '\n'.join(data_lines)
+                            df = pd.read_csv(StringIO(csv_str), sep='|', header=None, skipinitialspace=True, engine='python')
+                            # Drop completely empty columns
+                            df = df.dropna(how='all', axis=1)
+                            
+                            # Expected columns (13 total)
+                            expected_columns = ['Symbol/Pair', 'Action (Buy/Sell)', 'Entry Price', 'Target Price', 'Stop Loss', 
+                                                'Expected Entry Condition/Timing', 'Expected Exit Condition/Timing', 'Thesis (≤50 words)', 
+                                                'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)', 
+                                                'Plain English Summary (1 sentence)', 'Data Sources']
+
+                            num_cols = len(df.columns)
+                            if num_cols == len(expected_columns) + 2:  # Assuming two empties
+                                df.columns = ['empty1'] + expected_columns + ['empty2']
+                                df = df.drop(['empty1', 'empty2'], axis=1)
+                            elif num_cols == len(expected_columns):
+                                df.columns = expected_columns
+                            elif num_cols < len(expected_columns):
+                                # Assign available and fill missing with NA
+                                df.columns = expected_columns[:num_cols]
+                                for missing_col in expected_columns[num_cols:]:
+                                    df[missing_col] = pd.NA
+                            else:
+                                # Truncate extra columns and assign expected
+                                df = df.iloc[:, :len(expected_columns)]
+                                df.columns = expected_columns
+                            
+                            df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+
+                            # Convert numeric columns to float, handling errors
+                            numeric_cols = ['Entry Price', 'Target Price', 'Stop Loss', 'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)']
+                            for col in numeric_cols:
+                                if col in df.columns:
+                                    df[col] = pd.to_numeric(df[col], errors='coerce')
+
+                            # Validate and fill NaN prices with live data where possible
+                            for index, row in df.iterrows():
+                                if 'Entry Price' in df.columns and pd.isna(row['Entry Price']):
+                                    symbol = row['Symbol/Pair'].replace('/', '-')
+                                    try:
+                                        data = yf.download(symbol, period='1d', interval='1m', progress=False, auto_adjust=True)
+                                        current_price = data['Close'][-1]
+                                        df.at[index, 'Entry Price'] = current_price
+                                    except Exception:
+                                        df.at[index, 'Entry Price'] = float('nan')  # Keep as NaN if fetch fails
+
+                            # Drop rows with too many NaNs (e.g., if >50% NaN)
+                            df = df.dropna(thresh=len(df.columns) * 0.5)
+
+                            st.session_state.recommendations = df
+                        else:
+                            st.error("No valid table found in response.")
+                    else:
+                        st.error("No table found in response.")
+
+                    st.session_state.report = report_content
+                    st.session_state.summary = summary_content
+                else:
+                    st.error("Failed to generate predictions with tool-calling loop.")
+                    # Show tool history for debugging
+                    st.json(tool_history)
 
             except Exception as e:
                 st.error(f"Error generating predictions: {e}")
@@ -336,7 +609,7 @@ with st.expander("View Portfolio and Performance"):
                             'Profit %': profit_pct
                         })
                         total_value += value
-                    except:
+                    except Exception:
                         current_values.append({
                             'Symbol/Pair': row['Symbol/Pair'],
                             'Current Price': 'Fetch Error',

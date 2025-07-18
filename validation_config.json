@@ -1,0 +1,35 @@
+{
+  "validation_settings": {
+    "max_data_age_minutes": 5,
+    "price_tolerance_percent": 1.0,
+    "enable_hallucination_detection": true,
+    "enable_continuous_monitoring": true,
+    "alert_thresholds": {
+      "max_hallucination_rate": 0.1,
+      "min_price_accuracy": 0.95,
+      "min_tool_calls": 1
+    }
+  },
+  "expected_price_ranges": {
+    "BTC-USD": [
+      115000,
+      125000
+    ],
+    "ETH-USD": [
+      3800,
+      4200
+    ],
+    "NVDA": [
+      450,
+      550
+    ],
+    "TSLA": [
+      380,
+      420
+    ],
+    "AAPL": [
+      195,
+      205
+    ]
+  }
+}
