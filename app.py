@@ -2001,23 +2001,19 @@ def render_terminal_display():
 
     # Generate unique terminal ID for this render
     terminal_id = f"terminal_{int(time.time() * 1000)}"
-    header = f'''
-    <div class="terminal-header">
-        <span>🖥️ Data Gathering Terminal</span>
-        <span style="margin-left: auto; font-size: 0.8rem;">
-            {total_logs} events | {active_sources} recent success
-        </span>
-        <div class="terminal-controls">
-            <button id="scroll-to-top-{terminal_id}" class="terminal-scroll-btn" title="Scroll to top">
-                ↑ Top
-            </button>
-            <button id="scroll-to-bottom-{terminal_id}" class="terminal-scroll-btn" title="Scroll to bottom">
-                ↓ Bottom
-            </button>
-        </div>
-        <span class="terminal-cursor">█</span>
-    </div>
-    '''
+    header = (
+        f'<div class="terminal-header">'
+        f'<span>🖥️ Data Gathering Terminal</span>'
+        f'<span style="margin-left: auto; font-size: 0.8rem;">'
+        f'{total_logs} events | {active_sources} recent success'
+        f'</span>'
+        f'<div class="terminal-controls">'
+        f'<button id="scroll-to-top-{terminal_id}" class="terminal-scroll-btn" title="Scroll to top">↑ Top</button>'
+        f'<button id="scroll-to-bottom-{terminal_id}" class="terminal-scroll-btn" title="Scroll to bottom">↓ Bottom</button>'
+        f'</div>'
+        f'<span class="terminal-cursor">█</span>'
+        f'</div>'
+    )
 
     # Terminal content with enhanced auto-scroll container
     content_lines = []
@@ -2038,15 +2034,11 @@ def render_terminal_display():
     # Join content lines
     joined_lines = "".join(content_lines)
 
-    # Build terminal content with proper structure - use separate elements to avoid parsing issues
-    terminal_content = (
-        f'<div id="{terminal_id}" class="terminal-content enhanced-auto-scroll">'
-        f'{joined_lines}'
-        f'<div id="terminal-bottom-{terminal_id}" class="terminal-anchor" style="height: 1px; visibility: hidden; margin: 0; padding: 0;"></div>'
-        f'</div>'
-    )
+    # Build terminal content with proper structure - ensure no newlines that could break parsing
+    terminal_content = f'<div id="{terminal_id}" class="terminal-content enhanced-auto-scroll">{joined_lines}</div>'
 
     # Enhanced JavaScript for auto-scroll functionality
+    # Wrap everything in the main terminal container
     terminal_html = f'''
     <div class="data-terminal terminal-auto-scroll">
         {header}
