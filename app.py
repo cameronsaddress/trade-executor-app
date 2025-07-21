@@ -2006,7 +2006,8 @@ def render_terminal_display():
     content_lines = []
     for log_entry in st.session_state.terminal_logs[-50:]:  # Show last 50 entries
         # Skip any log entries that might contain raw HTML (defensive check)
-        if isinstance(log_entry.get("message"), str) and "<div" in log_entry.get("message", ""):
+        message = log_entry.get("message", "")
+        if isinstance(message, str) and ("terminal-anchor" in message or "<div" in message or "terminal-bottom" in message):
             continue
         formatted_line = format_terminal_line(log_entry)
         content_lines.append(formatted_line)
@@ -2608,6 +2609,11 @@ if prediction_button:
                 "total_assets_analyzed": sum(len(market_data.get(category, {})) for category in ["stocks", "crypto", "forex", "commodities"])
             }
 
+            # Debug: Check if market data is actually populated
+            if not market_data or all(len(market_data.get(cat, {})) == 0 for cat in ["stocks", "crypto", "forex", "commodities"]):
+                st.error("⚠️ No market data found! Data gathering may have failed.")
+                add_terminal_log("system", "WARNING: Market data is empty or missing", status="error", function_name="data_check")
+
             # Create the comprehensive prompt with aggressive table enforcement
             prompt_with_all_data = f"""{formatted_prompt}
 
@@ -2688,6 +2694,17 @@ Start your table immediately after your market analysis. Use pipe characters (|)
             with st.expander("📊 Data Gathering Summary", expanded=False):
                 st.markdown("**Single API Call Implementation - No Tool Calling**")
 
+                # Debug: Show market data structure
+                st.markdown("**Debug - Market Data Structure:**")
+                st.json({
+                    "has_stocks": bool(market_data.get("stocks")),
+                    "has_crypto": bool(market_data.get("crypto")),
+                    "has_forex": bool(market_data.get("forex")),
+                    "has_commodities": bool(market_data.get("commodities")),
+                    "has_metadata": bool(market_data.get("metadata")),
+                    "keys": list(market_data.keys()) if market_data else []
+                })
+
                 validation_summary = market_data.get("validation_summary", {})
 
                 # Include quality threshold metrics
@@ -2728,7 +2745,9 @@ Start your table immediately after your market analysis. Use pipe characters (|)
                     ])
                     st.dataframe(reliability_summary_df, use_container_width=True)
 
-                st.json(validation_summary)
+                # Show the actual validation result
+                st.markdown("**Validation Result:**")
+                st.json(validation_result)
 
             # Process the AI response
             if final_content:
