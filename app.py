@@ -2035,7 +2035,8 @@ def render_terminal_display():
     joined_lines = "".join(content_lines)
 
     # Build terminal content with proper structure - ensure no newlines that could break parsing
-    terminal_content = f'<div id="{terminal_id}" class="terminal-content enhanced-auto-scroll">{joined_lines}</div>'
+    # Add the anchor div at the bottom for auto-scrolling
+    terminal_content = f'<div id="{terminal_id}" class="terminal-content enhanced-auto-scroll">{joined_lines}<div id="terminal-bottom-{terminal_id}" class="terminal-anchor"></div></div>'
 
     # Enhanced JavaScript for auto-scroll functionality
     # Wrap everything in the main terminal container
@@ -2052,7 +2053,18 @@ def render_terminal_display():
             const scrollToBottomBtn = document.getElementById('scroll-to-bottom-' + terminalId);
             const bottomAnchor = document.getElementById('terminal-bottom-' + terminalId);
 
-            if (!terminal) return;
+            // Debug logging
+            console.log('Terminal auto-scroll init:', {
+                terminalId: terminalId,
+                terminalFound: !!terminal,
+                bottomAnchorFound: !!bottomAnchor,
+                scrollButtonsFound: !!scrollToTopBtn && !!scrollToBottomBtn
+            });
+
+            if (!terminal) {
+                console.error('Terminal element not found!');
+                return;
+            }
 
             let isUserScrolling = false;
             let autoScrollEnabled = true;
@@ -2117,11 +2129,19 @@ def render_terminal_display():
             // Enhanced auto-scroll function
             function autoScrollToBottom() {{
                 if (autoScrollEnabled && !isUserScrolling && terminal) {{
-                    // Use smooth scrolling with animation
-                    terminal.scrollTo({{
-                        top: terminal.scrollHeight,
-                        behavior: 'smooth'
-                    }});
+                    // Scroll to the bottom anchor if it exists, otherwise scroll to terminal height
+                    if (bottomAnchor) {{
+                        bottomAnchor.scrollIntoView({{
+                            behavior: 'smooth',
+                            block: 'end'
+                        }});
+                    }} else {{
+                        // Fallback to terminal scrollHeight
+                        terminal.scrollTo({{
+                            top: terminal.scrollHeight,
+                            behavior: 'smooth'
+                        }});
+                    }}
 
                     // Add visual feedback for auto-scroll
                     terminal.classList.add('auto-scrolling');
@@ -2158,7 +2178,11 @@ def render_terminal_display():
             // Periodic check for new content (fallback)
             const periodicScroll = setInterval(function() {{
                 if (terminal && document.contains(terminal)) {{
-                    autoScrollToBottom();
+                    // Check if we're at the bottom before auto-scrolling
+                    const isAtBottom = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 10;
+                    if (isAtBottom || autoScrollEnabled) {{
+                        autoScrollToBottom();
+                    }}
                 }} else {{
                     clearInterval(periodicScroll);
                     observer.disconnect();
@@ -2805,70 +2829,165 @@ Start your table immediately after your market analysis. Use pipe characters (|)
 
                 # Parse table if present
                 if table_content:
-                    if status_callback:
-                        status_callback(f"📊 Found table content with {len(table_content)} characters")
-                    lines = table_content.split('\n')
-                    if len(lines) > 2:
-                        data_lines = [line for line in lines[2:] if line.strip()]
-                        csv_str = '\n'.join(data_lines)
-                        df = pd.read_csv(StringIO(csv_str), sep='|', header=None, skipinitialspace=True, engine='python')
-                        df = df.dropna(how='all', axis=1)
+                    try:
+                        if status_callback:
+                            status_callback(f"📊 Found table content with {len(table_content)} characters")
+                        lines = table_content.split('\n')
 
-                        # Support both simplified and full formats
-                        simplified_columns = ['Symbol', 'Action', 'Entry', 'Target', 'Stop', 'ROI%', 'Thesis']
-                        expected_columns = ['Symbol/Pair', 'Action (Buy/Sell)', 'Entry Price', 'Target Price', 'Stop Loss',
-                                            'Expected Entry Condition/Timing', 'Expected Exit Condition/Timing', 'Thesis (≤50 words)',
-                                            'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)',
-                                            'Plain English Summary (1 sentence)', 'Data Sources']
+                        # Debug: Log the first few lines to understand the structure
+                        if status_callback and len(lines) > 0:
+                            status_callback(f"🔍 Table has {len(lines)} lines, first line: {lines[0][:100] if lines else 'empty'}")
 
-                        num_cols = len(df.columns)
-                        # Check if it's simplified format (7 columns)
-                        if num_cols == len(simplified_columns):
-                            df.columns = simplified_columns
-                            # Convert to full format for consistency
-                            df['Symbol/Pair'] = df['Symbol']
-                            df['Action (Buy/Sell)'] = df['Action']
-                            df['Entry Price'] = df['Entry']
-                            df['Target Price'] = df['Target']
-                            df['Stop Loss'] = df['Stop']
-                            df['Projected ROI (%)'] = df['ROI%']
-                            df['Thesis (≤50 words)'] = df['Thesis']
-                            # Add missing columns with defaults
-                            df['Expected Entry Condition/Timing'] = 'Market open'
-                            df['Expected Exit Condition/Timing'] = 'Target reached'
-                            df['Likelihood of Profit (%)'] = 70
-                            df['Recommended Allocation (% of portfolio)'] = 5
-                            df['Plain English Summary (1 sentence)'] = df['Thesis']
-                            df['Data Sources'] = 'yfinance_safe'
-                            # Reorder to match expected columns
-                            df = df[expected_columns]
-                            num_cols = len(expected_columns)
-                        if num_cols >= len(expected_columns):
-                            df = df.iloc[:, :len(expected_columns)]
-                            df.columns = expected_columns
-                        elif num_cols < len(expected_columns):
-                            df.columns = expected_columns[:num_cols]
-                            for missing_col in expected_columns[num_cols:]:
-                                df[missing_col] = pd.NA
+                        if len(lines) > 2:
+                            # Skip header rows and get data lines
+                            data_lines = []
+                            for i, line in enumerate(lines[2:]):
+                                line = line.strip()
+                                if line and line.count('|') >= 2:  # Ensure line has at least 2 pipes (minimum for a valid row)
+                                    # Clean up the line: remove leading/trailing pipes
+                                    if line.startswith('|'):
+                                        line = line[1:]
+                                    if line.endswith('|'):
+                                        line = line[:-1]
+                                    data_lines.append(line)
 
-                        df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+                            if not data_lines:
+                                raise ValueError("No valid data rows found in table")
 
-                        # Convert numeric columns
-                        numeric_cols = ['Entry Price', 'Target Price', 'Stop Loss', 'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)']
-                        for col in numeric_cols:
-                            if col in df.columns:
-                                df[col] = pd.to_numeric(df[col], errors='coerce')
+                            # Create CSV string
+                            csv_str = '\n'.join(data_lines)
 
-                        # Drop rows with too many missing values
-                        df = df.dropna(thresh=len(df.columns) * 0.5)
+                            # Debug: Log CSV content
+                            if status_callback:
+                                status_callback(f"📋 Processing {len(data_lines)} data rows")
 
-                        add_terminal_log("system", f"Successfully parsed {len(df)} trading recommendations",
-                                       status="success", function_name="parse_recommendations_table")
-                        update_status_display()
+                            # Parse CSV with error handling
+                            try:
+                                df = pd.read_csv(StringIO(csv_str), sep='|', header=None, skipinitialspace=True, engine='python')
+                            except pd.errors.ParserError as e:
+                                # If parsing fails, try to parse line by line
+                                if status_callback:
+                                    status_callback(f"⚠️ Standard parsing failed: {str(e)}, trying line-by-line parsing")
 
-                        st.session_state.recommendations = df
-                    else:
-                        st.error("No valid table found in response.")
+                                # Parse each line manually
+                                parsed_rows = []
+                                for line_num, line in enumerate(data_lines):
+                                    try:
+                                        # Split by pipe and clean each field
+                                        fields = [field.strip() for field in line.split('|')]
+                                        if fields:  # Only add non-empty rows
+                                            parsed_rows.append(fields)
+                                    except Exception as line_error:
+                                        if status_callback:
+                                            status_callback(f"⚠️ Skipping line {line_num + 3}: {str(line_error)}")
+
+                                if not parsed_rows:
+                                    raise ValueError("No valid rows could be parsed from table")
+
+                                # Create DataFrame from parsed rows
+                                # Find the maximum number of columns
+                                max_cols = max(len(row) for row in parsed_rows)
+                                # Pad shorter rows with empty strings
+                                for row in parsed_rows:
+                                    while len(row) < max_cols:
+                                        row.append('')
+
+                                df = pd.DataFrame(parsed_rows)
+
+                            # Drop empty columns
+                            df = df.dropna(how='all', axis=1)
+
+                            # Remove completely empty rows
+                            df = df[df.apply(lambda x: x.str.strip() if x.dtype == "object" else x).ne('').any(axis=1)]
+
+                            # Support both simplified and full formats
+                            simplified_columns = ['Symbol', 'Action', 'Entry', 'Target', 'Stop', 'ROI%', 'Thesis']
+                            expected_columns = ['Symbol/Pair', 'Action (Buy/Sell)', 'Entry Price', 'Target Price', 'Stop Loss',
+                                                'Expected Entry Condition/Timing', 'Expected Exit Condition/Timing', 'Thesis (≤50 words)',
+                                                'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)',
+                                                'Plain English Summary (1 sentence)', 'Data Sources']
+
+                            num_cols = len(df.columns)
+                            # Check if it's simplified format (7 columns)
+                            if num_cols == len(simplified_columns):
+                                df.columns = simplified_columns
+                                # Convert to full format for consistency
+                                df['Symbol/Pair'] = df['Symbol']
+                                df['Action (Buy/Sell)'] = df['Action']
+                                df['Entry Price'] = df['Entry']
+                                df['Target Price'] = df['Target']
+                                df['Stop Loss'] = df['Stop']
+                                df['Projected ROI (%)'] = df['ROI%']
+                                df['Thesis (≤50 words)'] = df['Thesis']
+                                # Add missing columns with defaults
+                                df['Expected Entry Condition/Timing'] = 'Market open'
+                                df['Expected Exit Condition/Timing'] = 'Target reached'
+                                df['Likelihood of Profit (%)'] = 70
+                                df['Recommended Allocation (% of portfolio)'] = 5
+                                df['Plain English Summary (1 sentence)'] = df['Thesis']
+                                df['Data Sources'] = 'yfinance_safe'
+                                # Reorder to match expected columns
+                                df = df[expected_columns]
+                                num_cols = len(expected_columns)
+                            if num_cols >= len(expected_columns):
+                                df = df.iloc[:, :len(expected_columns)]
+                                df.columns = expected_columns
+                            elif num_cols < len(expected_columns):
+                                df.columns = expected_columns[:num_cols]
+                                for missing_col in expected_columns[num_cols:]:
+                                    df[missing_col] = pd.NA
+
+                            df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+
+                            # Convert numeric columns
+                            numeric_cols = ['Entry Price', 'Target Price', 'Stop Loss', 'Projected ROI (%)', 'Likelihood of Profit (%)', 'Recommended Allocation (% of portfolio)']
+                            for col in numeric_cols:
+                                if col in df.columns:
+                                    df[col] = pd.to_numeric(df[col], errors='coerce')
+
+                            # Drop rows with too many missing values
+                            df = df.dropna(thresh=len(df.columns) * 0.5)
+
+                            add_terminal_log("system", f"Successfully parsed {len(df)} trading recommendations",
+                                           status="success", function_name="parse_recommendations_table")
+                            update_status_display()
+
+                            st.session_state.recommendations = df
+                        else:
+                            st.error("No valid table found in response (less than 3 lines).")
+
+                    except pd.errors.ParserError as e:
+                        st.error(f"❌ Failed to parse table: {str(e)}")
+                        st.markdown("**Table parsing error details:**")
+                        st.markdown("- Error type: CSV parsing error")
+                        st.markdown(f"- Error message: {str(e)}")
+                        st.markdown("**Debug info:**")
+                        if table_content:
+                            lines = table_content.split('\n')
+                            st.markdown(f"- Table lines: {len(lines)}")
+                            if lines:
+                                st.markdown(f"- First line: `{lines[0][:100]}...`")
+                                if len(lines) > 2:
+                                    st.markdown(f"- Third line (first data): `{lines[2][:100]}...`")
+                        st.markdown("**Possible causes:**")
+                        st.markdown("- Inconsistent number of columns in table rows")
+                        st.markdown("- Missing or extra pipe delimiters")
+                        st.markdown("- Special characters in table cells")
+
+                    except ValueError as e:
+                        st.error(f"❌ Table validation error: {str(e)}")
+                        st.markdown("**Debug info:**")
+                        st.markdown(f"- Table content length: {len(table_content)} chars")
+                        st.markdown("- Table might be malformed or empty")
+
+                    except Exception as e:
+                        st.error(f"❌ Unexpected error parsing table: {str(e)}")
+                        st.markdown(f"**Error type:** {type(e).__name__}")
+                        st.markdown(f"**Error details:** {str(e)}")
+                        # Log the table content for debugging
+                        if table_content:
+                            with st.expander("🔍 Show raw table content for debugging"):
+                                st.text(table_content)
                 else:
                     st.error("❌ No table found in response.")
                     st.markdown("**Debugging Info:**")
