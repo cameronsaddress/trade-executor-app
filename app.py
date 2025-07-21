@@ -2005,6 +2005,9 @@ def render_terminal_display():
     # Terminal content with enhanced auto-scroll container
     content_lines = []
     for log_entry in st.session_state.terminal_logs[-50:]:  # Show last 50 entries
+        # Skip any log entries that might contain raw HTML (defensive check)
+        if isinstance(log_entry.get("message"), str) and "<div" in log_entry.get("message", ""):
+            continue
         formatted_line = format_terminal_line(log_entry)
         content_lines.append(formatted_line)
 
@@ -2968,12 +2971,476 @@ if st.session_state.recommendations is not None:
         target_price_str = f"${target_price:.2f}" if isinstance(target_price, (int, float)) else str(target_price)
         stop_loss_str = f"${stop_loss:.2f}" if isinstance(stop_loss, (int, float)) else str(stop_loss)
 
-        # Create beautiful enhanced trading card
-        st.markdown(f"""
+        # Create beautiful enhanced trading card using container
+        with st.container():
+            # Build HTML with embedded CSS for components.html
+            card_html = f"""
+        <style>
+            body {{
+                margin: 0;
+                padding: 0;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            }}
+
+            .trading-card {{
+                background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+                border: 1px solid #333;
+                border-radius: 12px;
+                padding: 24px;
+                margin: 16px 0;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                color: #FAFAFA;
+            }}
+
+            .card-header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 24px;
+                padding-bottom: 20px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }}
+
+            .card-header h4 {{
+                color: #FAFAFA;
+                margin: 0;
+                font-size: 24px;
+                font-weight: 600;
+            }}
+
+            .action-badge {{
+                display: inline-block;
+                padding: 4px 12px;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 600;
+                margin-left: 12px;
+                color: white;
+                text-transform: uppercase;
+            }}
+
+            .status-indicator {{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-top: 8px;
+                color: #999;
+                font-size: 14px;
+            }}
+
+            .status-dot {{
+                width: 8px;
+                height: 8px;
+                background: #F44336;
+                border-radius: 50%;
+                animation: pulse 2s infinite;
+            }}
+
+            @keyframes pulse {{
+                0% {{ opacity: 1; }}
+                50% {{ opacity: 0.5; }}
+                100% {{ opacity: 1; }}
+            }}
+
+            .header-controls {{
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }}
+
+            .confidence-badge {{
+                background: rgba(33, 150, 243, 0.2);
+                color: #2196F3;
+                padding: 8px 16px;
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 14px;
+                border: 1px solid rgba(33, 150, 243, 0.3);
+            }}
+
+            .copy-button, .info-button {{
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                color: #FAFAFA;
+                padding: 8px 12px;
+                border-radius: 8px;
+                font-size: 16px;
+                cursor: pointer;
+                transition: all 0.3s;
+            }}
+
+            .copy-button:hover, .info-button:hover {{
+                background: rgba(255, 255, 255, 0.2);
+                transform: translateY(-2px);
+            }}
+
+            .card-content {{
+                padding-top: 24px;
+            }}
+
+            .metrics-grid {{
+                display: grid;
+                grid-template-columns: 1.5fr 1fr;
+                gap: 24px;
+            }}
+
+            .price-section {{
+                background: rgba(255, 255, 255, 0.05);
+                padding: 20px;
+                border-radius: 10px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }}
+
+            .price-section-header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+                padding-bottom: 16px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }}
+
+            .price-section-title {{
+                font-size: 18px;
+                font-weight: 600;
+                color: #FAFAFA;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }}
+
+            .quick-calc {{
+                background: rgba(76, 175, 80, 0.2);
+                color: #4CAF50;
+                padding: 6px 12px;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 600;
+            }}
+
+            .price-row {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px 0;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            }}
+
+            .price-row:last-child {{
+                border-bottom: none;
+            }}
+
+            .price-label {{
+                color: #999;
+                font-size: 14px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }}
+
+            .price-value {{
+                font-size: 20px;
+                font-weight: 700;
+                color: #FAFAFA;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }}
+
+            .copy-price {{
+                font-size: 14px;
+                cursor: pointer;
+                opacity: 0.5;
+                transition: opacity 0.3s;
+            }}
+
+            .copy-price:hover {{
+                opacity: 1;
+            }}
+
+            .price-change {{
+                font-size: 14px;
+                font-weight: 600;
+                padding: 2px 8px;
+                border-radius: 4px;
+            }}
+
+            .price-change.positive {{
+                color: #4CAF50;
+                background: rgba(76, 175, 80, 0.1);
+            }}
+
+            .price-change.negative {{
+                color: #F44336;
+                background: rgba(244, 67, 54, 0.1);
+            }}
+
+            .section-divider {{
+                height: 1px;
+                background: rgba(255, 255, 255, 0.1);
+                margin: 20px 0;
+            }}
+
+            .risk-reward-chart {{
+                margin-top: 20px;
+                padding: 16px;
+                background: rgba(255, 255, 255, 0.03);
+                border-radius: 8px;
+            }}
+
+            .risk-reward-header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 12px;
+            }}
+
+            .risk-reward-title {{
+                color: #FAFAFA;
+                font-weight: 600;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }}
+
+            .risk-reward-ratio {{
+                color: #4CAF50;
+                font-size: 18px;
+                font-weight: 700;
+            }}
+
+            .risk-reward-bars {{
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-top: 12px;
+            }}
+
+            .risk-bar {{
+                height: 24px;
+                background: linear-gradient(90deg, #F44336, #EF5350);
+                border-radius: 4px;
+            }}
+
+            .reward-bar {{
+                height: 24px;
+                background: linear-gradient(90deg, #4CAF50, #66BB6A);
+                border-radius: 4px;
+            }}
+
+            .risk-label, .reward-label {{
+                font-size: 12px;
+                font-weight: 600;
+                color: #999;
+                min-width: 50px;
+            }}
+
+            .progress-container {{
+                margin-bottom: 20px;
+            }}
+
+            .progress-header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 8px;
+            }}
+
+            .progress-label {{
+                color: #999;
+                font-size: 14px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }}
+
+            .progress-value {{
+                font-size: 18px;
+                font-weight: 700;
+                color: #FAFAFA;
+            }}
+
+            .progress-bar {{
+                height: 8px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+                overflow: hidden;
+            }}
+
+            .progress-fill {{
+                height: 100%;
+                transition: width 0.5s ease;
+            }}
+
+            .analysis-section {{
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 10px;
+                margin-bottom: 16px;
+                overflow: hidden;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }}
+
+            .analysis-header {{
+                padding: 16px 20px;
+                cursor: pointer;
+                user-select: none;
+                transition: background 0.3s;
+            }}
+
+            .analysis-header:hover {{
+                background: rgba(255, 255, 255, 0.05);
+            }}
+
+            .analysis-title {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                color: #FAFAFA;
+                font-weight: 600;
+            }}
+
+            .analysis-title-left {{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }}
+
+            .expand-icon {{
+                transition: transform 0.3s;
+                color: #999;
+            }}
+
+            .analysis-content {{
+                padding: 0 20px 20px;
+                max-height: 500px;
+                overflow: hidden;
+                transition: max-height 0.3s ease;
+            }}
+
+            .analysis-content.collapsed {{
+                max-height: 0;
+                padding-bottom: 0;
+            }}
+
+            .analysis-summary {{
+                color: #FAFAFA;
+                font-weight: 600;
+                margin-bottom: 8px;
+            }}
+
+            .analysis-details {{
+                color: #CCC;
+                line-height: 1.6;
+                font-size: 14px;
+            }}
+
+            .analysis-tags {{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-top: 12px;
+            }}
+
+            .analysis-tag {{
+                background: rgba(33, 150, 243, 0.2);
+                color: #64B5F6;
+                padding: 4px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+
+            .ib-button-container {{
+                text-align: center;
+                margin-top: 32px;
+                padding-top: 24px;
+                border-top: 1px solid rgba(255, 255, 255, 0.1);
+            }}
+
+            .ib-button {{
+                display: inline-block;
+                padding: 16px 32px;
+                background: linear-gradient(135deg, var(--action-color), var(--action-color-dark));
+                color: white;
+                text-decoration: none;
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 16px;
+                transition: all 0.3s;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            }}
+
+            .ib-button:hover {{
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+            }}
+
+            .ib-disclaimer {{
+                color: #666;
+                font-size: 12px;
+                margin-top: 12px;
+            }}
+
+            .icon {{
+                font-size: 16px;
+            }}
+
+            .tooltip {{
+                position: relative;
+            }}
+
+            .tooltip[data-tooltip]:hover::after {{
+                content: attr(data-tooltip);
+                position: absolute;
+                bottom: 100%;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(0, 0, 0, 0.9);
+                color: white;
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+                white-space: nowrap;
+                z-index: 1000;
+                margin-bottom: 8px;
+            }}
+        </style>
+
+        <script>
+            function copyToClipboard(text, element) {{
+                navigator.clipboard.writeText(text).then(function() {{
+                    const originalText = element.innerHTML;
+                    element.innerHTML = '✓';
+                    setTimeout(function() {{
+                        element.innerHTML = originalText;
+                    }}, 1000);
+                }});
+            }}
+
+            function copyTradeDetails(symbol, action, entry, target, stop) {{
+                const details = `${{symbol}} ${{action}}\\nEntry: ${{entry}}\\nTarget: ${{target}}\\nStop: ${{stop}}`;
+                copyToClipboard(details, event.target);
+            }}
+
+            document.addEventListener('DOMContentLoaded', function() {{
+                // Toggle analysis sections
+                const headers = document.querySelectorAll('.analysis-header');
+                headers.forEach(header => {{
+                    header.addEventListener('click', function() {{
+                        const content = this.nextElementSibling;
+                        const icon = this.querySelector('.expand-icon');
+
+                        content.classList.toggle('collapsed');
+                        icon.style.transform = content.classList.contains('collapsed') ? 'rotate(0deg)' : 'rotate(180deg)';
+                    }});
+                }});
+            }});
+        </script>
+
         <div class="trading-card" style="--action-color: {action_color}; --action-color-dark: {action_color_dark};">
             <div class="card-header">
                 <div>
-                    <h4 style="color: #FAFAFA;">
+                    <h4>
                         {symbol}
                         <span class="action-badge" style="background: linear-gradient(135deg, {action_color}, {action_color_dark});">
                             {action}
@@ -2998,19 +3465,6 @@ if st.session_state.recommendations is not None:
                     <!-- TradingView Widget BEGIN -->
                     <div class="tradingview-widget-container">
                       <div class="tradingview-widget-container__widget"></div>
-                      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-single-quote.js" async>
-                      {{
-                      "symbol": "{symbol}",
-                      "width": "180",
-                      "height": "80",
-                      "locale": "en",
-                      "dateRange": "1D",
-                      "colorTheme": "dark",
-                      "isTransparent": true,
-                      "autosize": false,
-                      "largeChartUrl": ""
-                      }}
-                      </script>
                     </div>
                     <!-- TradingView Widget END -->
                 </div>
@@ -3228,7 +3682,10 @@ if st.session_state.recommendations is not None:
                 </div>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """
+
+            # Render the card HTML using components for better HTML handling
+            components.html(card_html, height=1200, scrolling=False)
 
     # Display summary paragraph
     st.markdown("### Market Summary")
