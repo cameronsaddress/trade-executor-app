@@ -309,8 +309,12 @@ def make_single_api_call(api_key: str, prompt_with_data: str, status_callback=No
                                     thinking_count += 1
 
                                 if actual_content:
-                                    content_parts.append(actual_content)
-                                    token_count += 1
+                                    # Filter out any stray HTML tags from streaming content
+                                    if actual_content.strip() in ["</div>", "<div>", "</div", "<div"]:
+                                        print(f"WARNING: Filtering out HTML tag from stream: {actual_content}")
+                                    else:
+                                        content_parts.append(actual_content)
+                                        token_count += 1
 
                                 # Update display every few tokens
                                 if (thinking_count + token_count) % 5 == 0 and streaming_placeholder:
@@ -1893,6 +1897,19 @@ def add_terminal_log(log_type, message, details=None, url=None, function_name=No
     if 'terminal_logs' not in st.session_state:
         st.session_state.terminal_logs = []
 
+    # Prevent HTML content from being added to terminal logs
+    message_str = str(message) if message else ""
+    details_str = str(details) if details else ""
+
+    # Check for HTML tags in message or details
+    html_tags = ["<div", "</div", "terminal-anchor", "terminal-bottom", "<script", "</script", "<html", "</html"]
+    if any(tag in message_str.lower() for tag in html_tags):
+        print(f"WARNING: HTML detected in terminal message, skipping: {message_str[:100]}")
+        return
+    if any(tag in details_str.lower() for tag in html_tags):
+        print(f"WARNING: HTML detected in terminal details, skipping: {details_str[:100]}")
+        return
+
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     log_entry = {
         "timestamp": timestamp,
@@ -2006,18 +2023,28 @@ def render_terminal_display():
     content_lines = []
     for log_entry in st.session_state.terminal_logs[-50:]:  # Show last 50 entries
         # Skip any log entries that might contain raw HTML (defensive check)
-        message = log_entry.get("message", "")
-        if isinstance(message, str) and ("terminal-anchor" in message or "<div" in message or "terminal-bottom" in message):
+        message = str(log_entry.get("message", ""))
+        details = str(log_entry.get("details", ""))
+
+        # Check both message and details for HTML content
+        if any(html_tag in message.lower() for html_tag in ["<div", "</div", "terminal-anchor", "terminal-bottom", "<script", "</script"]):
             continue
+        if any(html_tag in details.lower() for html_tag in ["<div", "</div", "terminal-anchor", "terminal-bottom", "<script", "</script"]):
+            continue
+
         formatted_line = format_terminal_line(log_entry)
         content_lines.append(formatted_line)
 
-    terminal_content = f'''
-    <div id="{terminal_id}" class="terminal-content enhanced-auto-scroll">
-        {"".join(content_lines)}
-        <div id="terminal-bottom-{terminal_id}" class="terminal-anchor"></div>
-    </div>
-    '''
+    # Join content lines
+    joined_lines = "".join(content_lines)
+
+    # Build terminal content with proper structure - use separate elements to avoid parsing issues
+    terminal_content = (
+        f'<div id="{terminal_id}" class="terminal-content enhanced-auto-scroll">'
+        f'{joined_lines}'
+        f'<div id="terminal-bottom-{terminal_id}" class="terminal-anchor" style="height: 1px; visibility: hidden; margin: 0; padding: 0;"></div>'
+        f'</div>'
+    )
 
     # Enhanced JavaScript for auto-scroll functionality
     terminal_html = f'''
@@ -2680,7 +2707,8 @@ Start your table immediately after your market analysis. Use pipe characters (|)
             status_placeholder.text("📋 Processing AI analysis results...")
 
             # Clear streaming display after completion
-            streaming_placeholder.empty()
+            if streaming_placeholder:
+                streaming_placeholder.empty()
 
             # Store API response data for troubleshooting sidebar
             st.session_state.last_api_response = final_content
@@ -2751,7 +2779,11 @@ Start your table immediately after your market analysis. Use pipe characters (|)
 
             # Process the AI response
             if final_content:
+                # Clean any stray HTML tags from content
                 content = final_content
+                if content.strip().endswith("</div>"):
+                    print("WARNING: Removing stray </div> from AI response")
+                    content = content.rstrip().rstrip("</div>").strip()
                 add_terminal_log("system", "Starting response parsing", status="info", function_name="parse_ai_response")
                 update_status_display()
 
