@@ -2054,17 +2054,17 @@ def render_terminal_display():
             const bottomAnchor = document.getElementById('terminal-bottom-' + terminalId);
 
             // Debug logging
-            console.log('Terminal auto-scroll init:', {
+            console.log("Terminal auto-scroll init:", {{
                 terminalId: terminalId,
                 terminalFound: !!terminal,
                 bottomAnchorFound: !!bottomAnchor,
                 scrollButtonsFound: !!scrollToTopBtn && !!scrollToBottomBtn
-            });
+            }});
 
-            if (!terminal) {
-                console.error('Terminal element not found!');
+            if (!terminal) {{
+                console.error("Terminal element not found!");
                 return;
-            }
+            }}
 
             let isUserScrolling = false;
             let autoScrollEnabled = true;
